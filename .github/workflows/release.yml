@@ -56,6 +56,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Recall v__VERSION__'
           releaseBody: 'See the assets below to download this version of Recall.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
