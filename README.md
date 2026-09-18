@@ -1,6 +1,12 @@
-# Recall
+<div align="center">
+  <img src="docs/assets/icon.png" width="100" height="100" alt="Recall Icon" />
+  <h1>Recall</h1>
+  <p><strong>Modern, Cross-Platform Offline E-Learning Authoring Suite & Interactive Course Player</strong></p>
+</div>
 
-> **Modern, Cross-Platform Offline E-Learning Authoring Suite & Interactive Course Player**
+<p align="center">
+  <img src="docs/assets/screenshot.png" alt="Recall Course Editor Screenshot" width="100%" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+</p>
 
 **Recall** is an authoring desktop application built with **Tauri v2**, **React 19**, **TypeScript**, and **Rust**. Designed for educators, trainers, and curriculum designers, Recall lets you build interactive multimedia lessons, configure 12 interactive assessment formats, manage sequenced curriculums with mastery gates, and issue verifiable Certificates of Completion with offline QR code verification.
 
