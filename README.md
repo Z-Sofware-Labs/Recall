@@ -146,4 +146,4 @@ The compiled bundles will be generated in `src-tauri/target/release/bundle/`:
 
 ## 📄 License
 
-This project is proprietary software developed by **Z Software Labs**. All rights reserved.
+This project is open-source software developed by **Z Software Labs** and is licensed under the [MIT License](LICENSE).

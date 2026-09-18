@@ -3,8 +3,8 @@ name = "recall"
 version = "1.0.0"
 description = "Recall Desktop App"
 authors = ["Z Software Labs"]
-license = ""
-repository = ""
+license = "MIT"
+repository = "https://github.com/Z-Sofware-Labs/Recall"
 edition = "2021"
 rust-version = "1.77.2"
 
