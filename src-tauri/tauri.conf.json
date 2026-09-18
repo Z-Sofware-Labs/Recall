@@ -1,0 +1,86 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Recall",
+  "version": "1.0.0",
+  "identifier": "com.recall.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Recall",
+        "url": "index.html",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "Z Software Labs",
+    "copyright": "Copyright \u00a9 2026 Z Software Labs",
+    "targets": "all",
+    "resources": {
+      "icons/recall-doc.ico": "recall-doc.ico",
+      "icons/recall-doc.png": "recall-doc.png"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Education",
+    "fileAssociations": [
+      {
+        "ext": [
+          "recall"
+        ],
+        "name": "Recall Project File",
+        "description": "Recall Course Project File",
+        "mimeType": "application/x-recall",
+        "role": "Editor"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "template": "installer.nsi"
+      },
+      "wix": {
+        "language": "en-US"
+      }
+    },
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/z-software-labs/recall/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Recall",
+  "description": "A comprehensive interface for designing courses, building interactive quizzes, and managing student certificates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
