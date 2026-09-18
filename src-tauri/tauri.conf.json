@@ -78,9 +78,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/z-software-labs/recall/releases/latest/download/latest.json"
+        "https://github.com/Z-Sofware-Labs/Recall/releases/latest/download/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMwRkUwMjJBNkEyQkM1RDYKUldUV3hTdHFLZ0wrd0Qrcmc4NXhaOE84aDRRU1JBU3VDVEJheVJDS0wzeGZvRksrdzVQOVRzV20K"
     }
   }
 }
