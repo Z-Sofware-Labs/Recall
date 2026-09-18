@@ -15,5 +15,6 @@ yarn-debug.log*
 yarn-error.log*
 *.key
 *.key.pub
+bun.lock
 ~/.tauri/
 ~
