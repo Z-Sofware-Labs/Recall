@@ -47,8 +47,10 @@ pub fn detect_office_suite() -> OfficeSuiteInfo {
 
 fn detect_office_suite_internal() -> OfficeSuiteInfo {
     let platform = std::env::consts::OS.to_string();
+    #[allow(unused_mut)]
     let mut has_ms = false;
     let mut has_lo = false;
+    #[allow(unused_mut)]
     let mut ms_ver = None;
     let mut lo_path = None;
 
@@ -147,13 +149,14 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
 
     #[cfg(target_os = "linux")]
     {
-        // Check common binary paths first, then fall back to `which`
+        // 1. Check standard static paths (system & user flatpak/snap)
         let potential_lo = [
             "/usr/bin/soffice",
             "/usr/local/bin/soffice",
             "/usr/bin/libreoffice",
             "/usr/local/bin/libreoffice",
             "/var/lib/flatpak/exports/bin/org.libreoffice.LibreOffice",
+            "/snap/bin/libreoffice",
         ];
 
         for path in potential_lo {
@@ -164,13 +167,73 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
             }
         }
 
+        // 2. Check user-level Flatpak export (~/.local/share/flatpak/exports/bin/org.libreoffice.LibreOffice)
         if !has_lo {
-            if let Ok(output) = Command::new("which").arg("soffice").output() {
-                if output.status.success() {
-                    let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !p.is_empty() {
-                        has_lo = true;
-                        lo_path = Some(p);
+            if let Ok(home) = std::env::var("HOME") {
+                let user_flatpak = Path::new(&home)
+                    .join(".local/share/flatpak/exports/bin/org.libreoffice.LibreOffice");
+                if user_flatpak.exists() {
+                    has_lo = true;
+                    lo_path = Some(user_flatpak.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // 3. Check versioned binaries in /usr/bin or /usr/local/bin (e.g. /usr/bin/libreoffice26.8)
+        if !has_lo {
+            let scan_dirs = ["/usr/bin", "/usr/local/bin"];
+            for dir in scan_dirs {
+                if let Ok(entries) = fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let file_name = entry.file_name();
+                        let name_str = file_name.to_string_lossy();
+                        if (name_str.starts_with("libreoffice") || name_str.starts_with("soffice"))
+                            && name_str != "libreoffice-from-scratch"
+                        {
+                            let candidate = entry.path();
+                            if candidate.is_file() {
+                                has_lo = true;
+                                lo_path = Some(candidate.to_string_lossy().to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
+                if has_lo {
+                    break;
+                }
+            }
+        }
+
+        // 4. Check /opt/libreoffice* installations (e.g. /opt/libreoffice26.8/program/soffice)
+        if !has_lo {
+            if let Ok(entries) = fs::read_dir("/opt") {
+                for entry in entries.flatten() {
+                    let file_name = entry.file_name();
+                    let name_str = file_name.to_string_lossy();
+                    if name_str.starts_with("libreoffice") || name_str.starts_with("openoffice") {
+                        let soffice_bin = entry.path().join("program").join("soffice");
+                        if soffice_bin.exists() {
+                            has_lo = true;
+                            lo_path = Some(soffice_bin.to_string_lossy().to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Fall back to `which` for soffice or libreoffice
+        if !has_lo {
+            for bin in ["soffice", "libreoffice"] {
+                if let Ok(output) = Command::new("which").arg(bin).output() {
+                    if output.status.success() {
+                        let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        if !p.is_empty() && Path::new(&p).exists() {
+                            has_lo = true;
+                            lo_path = Some(p);
+                            break;
+                        }
                     }
                 }
             }

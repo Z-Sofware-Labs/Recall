@@ -992,9 +992,9 @@ export default function Help() {
   };
 
   return (
-    <div className="relative flex flex-col lg:flex-row h-[calc(100vh-120px)] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-sm">
+    <div className="relative flex flex-col lg:flex-row flex-1 h-full min-h-[500px] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-sm">
       {/* Sidebar TOC */}
-      <div className="w-full lg:w-72 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800 p-4 overflow-y-auto bg-slate-50/50 dark:bg-slate-950/40 flex flex-col">
+      <div className="w-full lg:w-72 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800 p-4 overflow-y-auto bg-slate-50/50 dark:bg-slate-950/40 flex flex-col shrink-0">
         <div className="flex items-center gap-2 mb-3 px-2">
           <BookOpen size={18} className="text-blue-600" />
           <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">User Guide</h3>
@@ -1033,7 +1033,7 @@ export default function Help() {
       </div>
 
       {/* Main Content Pane */}
-      <div className="flex-1 p-6 sm:p-10 overflow-y-auto max-w-4xl space-y-6">
+      <div className="flex-1 p-6 sm:p-10 overflow-y-auto w-full min-w-0 space-y-6">
         <div className="flex items-center gap-2.5 text-xs text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider">
           <HelpCircle size={15} />
           <span>Documentation</span>

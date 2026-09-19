@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(target_os = "windows")]
@@ -240,7 +240,16 @@ pub fn register_recall_file_association() -> Result<bool, String> {
         // FreeDesktop Shared MIME Info and icon-theme directories.
         let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe_dir = exe_path.parent().unwrap_or(&exe_path);
-        let icon_candidate = exe_dir.join("recall-doc.png");
+        
+        // Find icon across possible runtime & installation paths
+        let potential_icons = [
+            exe_dir.join("recall-doc.png"),
+            PathBuf::from("/usr/lib/Recall/recall-doc.png"),
+            PathBuf::from("/usr/share/Recall/recall-doc.png"),
+            PathBuf::from("/usr/share/icons/hicolor/128x128/apps/recall.png"),
+        ];
+
+        let found_icon = potential_icons.iter().find(|p| p.exists()).cloned();
 
         if let Some(home) = std::env::var_os("HOME") {
             let home_path = PathBuf::from(home);
@@ -264,28 +273,46 @@ pub fn register_recall_file_association() -> Result<bool, String> {
                 .arg(home_path.join(".local/share/mime"))
                 .output();
 
-            // 2. Install document icon into user hicolor icon theme so KDE Dolphin / GNOME Nautilus render it
-            if icon_candidate.exists() {
-                let icon_dest_dir = home_path.join(".local/share/icons/hicolor/128x128/mimetypes");
-                let _ = std::fs::create_dir_all(&icon_dest_dir);
-                let icon_dest = icon_dest_dir.join("application-x-recall.png");
-                let _ = std::fs::copy(&icon_candidate, icon_dest);
+            // 2. Install document icon into user hicolor & breeze icon themes across standard sizes
+            if let Some(ref icon_src) = found_icon {
+                let sizes = ["16x16", "32x32", "48x48", "64x64", "128x128", "256x256"];
+                for size in sizes {
+                    let icon_dest_dir = home_path.join(format!(".local/share/icons/hicolor/{}/mimetypes", size));
+                    let _ = std::fs::create_dir_all(&icon_dest_dir);
+                    let _ = std::fs::copy(icon_src, icon_dest_dir.join("application-x-recall.png"));
 
-                // Also place in apps icon folder for full shell recognition
+                    // Also install into KDE breeze user override if breeze icon theme is active
+                    let breeze_dest_dir = home_path.join(format!(".local/share/icons/breeze/mimetypes/{}", size));
+                    let _ = std::fs::create_dir_all(&breeze_dest_dir);
+                    let _ = std::fs::copy(icon_src, breeze_dest_dir.join("application-x-recall.png"));
+                }
+
+                // Place in apps icon folder for full shell recognition
                 let icon_app_dir = home_path.join(".local/share/icons/hicolor/128x128/apps");
                 let _ = std::fs::create_dir_all(&icon_app_dir);
-                let _ = std::fs::copy(&icon_candidate, icon_app_dir.join("recall-doc.png"));
+                let _ = std::fs::copy(icon_src, icon_app_dir.join("recall-doc.png"));
 
                 let _ = Command::new("gtk-update-icon-cache")
                     .args(["-f", "-t"])
                     .arg(home_path.join(".local/share/icons/hicolor"))
                     .output();
+
+                // KDE Plasma sycoca cache update (Plasma 6 / 5)
+                let _ = Command::new("kbuildsycoca6").output();
+                let _ = Command::new("kbuildsycoca5").output();
             }
         }
 
         // 3. Set default application for this mime type
+        // The installed desktop file on Linux is Recall.desktop
+        let desktop_file = if Path::new("/usr/share/applications/Recall.desktop").exists() {
+            "Recall.desktop"
+        } else {
+            "com.recall.desktop.desktop"
+        };
+
         let res = Command::new("xdg-mime")
-            .args(["default", "com.recall.desktop.desktop", "application/x-recall"])
+            .args(["default", desktop_file, "application/x-recall"])
             .output();
 
         match res {
