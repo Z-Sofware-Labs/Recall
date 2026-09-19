@@ -2,7 +2,7 @@
   "name": "recall",
   "author": "Z Software Labs",
   "license": "MIT",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "bundle:player": "tsx scripts/buildEngineBundle.ts",

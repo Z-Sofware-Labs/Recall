@@ -30,7 +30,7 @@ export default function AboutDialog({
         <div>
           <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">Recall</h2>
           <div className="flex items-center justify-center gap-2 mt-0.5">
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Version 1.0.0</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Version 1.0.1</span>
             {onCheckForUpdates && (
               <button
                 type="button"
