@@ -12,6 +12,10 @@ async function build() {
     bundle: true,
     format: 'iife',
     minify: true,
+    treeShaking: true,
+    legalComments: 'none',
+    drop: ['debugger'],
+    target: ['chrome100', 'safari14', 'firefox100', 'edge100'],
     write: false,
     define: {
       'process.env.NODE_ENV': '"production"',
@@ -19,9 +23,24 @@ async function build() {
   });
 
   const bundledCode = result.outputFiles[0].text;
-  const outTs = `// Auto-generated unified player engine bundle\nexport const STANDALONE_PLAYER_BUNDLE_JS = ${JSON.stringify(bundledCode)};\n`;
+
+  // Read production compiled CSS from dist/assets if available
+  let bundledCss = '';
+  const distAssetsDir = path.resolve(__dirname, '../dist/assets');
+  if (fs.existsSync(distAssetsDir)) {
+    const files = fs.readdirSync(distAssetsDir);
+    const cssFile = files.find(f => f.startsWith('index-') && f.endsWith('.css'));
+    if (cssFile) {
+      bundledCss = fs.readFileSync(path.join(distAssetsDir, cssFile), 'utf-8');
+    }
+  }
+
+  const outTs = `// Auto-generated unified player engine bundle
+export const STANDALONE_PLAYER_BUNDLE_JS = ${JSON.stringify(bundledCode)};
+export const STANDALONE_PLAYER_BUNDLE_CSS = ${JSON.stringify(bundledCss)};
+`;
   fs.writeFileSync(path.resolve(__dirname, '../src/services/playerBundle.generated.ts'), outTs, 'utf-8');
-  console.log(`Successfully generated playerBundle.generated.ts (${bundledCode.length} bytes)`);
+  console.log(`Successfully generated playerBundle.generated.ts (${bundledCode.length} bytes JS, ${bundledCss.length} bytes CSS)`);
 }
 
 build().catch(err => {

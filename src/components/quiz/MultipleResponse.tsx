@@ -571,26 +571,34 @@ export default function MultipleResponse({ initialData, onBack, onSaveToCourse }
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Assessment Title
+                <label 
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  ACTIVITY NAME
                 </label>
                 <input
                   type="text"
                   value={activityTitle}
                   onChange={(e) => setActivityTitle(e.target.value)}
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
                   placeholder="e.g. Multi-Select Assessment"
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Student Instructions / Question
+                <label 
+                  title="Write the general instructions for this activity in this box. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  OVERALL INSTRUCTION
                 </label>
                 <input
                   type="text"
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
+                  title="Write the general instructions for this activity in this box. (optional)"
                   placeholder="e.g. Choose all applicable options."
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
@@ -599,44 +607,15 @@ export default function MultipleResponse({ initialData, onBack, onSaveToCourse }
 
             {/* Display Mode Toggle & Questions Count */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Layers size={15} className="text-blue-600" />
-                  <span>Layout Display:</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {questions.length} Questions Configured
                 </span>
-
-                <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <button
-                    type="button"
-                    onClick={() => setDisplayMode('paginated')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${displayMode === 'paginated'
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                      }`}
-                  >
-                    <FileText size={13} />
-                    <span>One Question per Page</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setDisplayMode('single_page')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${displayMode === 'single_page'
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                      }`}
-                  >
-                    <LayoutList size={13} />
-                    <span>All on Single Page</span>
-                  </button>
-                </div>
+                <span className="text-xs text-slate-400">•</span>
+                <span className="text-xs text-slate-500">Learners see 1 question per page</span>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
-                  {questions.length} Questions Configured
-                </span>
-
                 <button
                   type="button"
                   onClick={() => setBulkModal({ isOpen: true, rawText: '', mode: 'append' })}

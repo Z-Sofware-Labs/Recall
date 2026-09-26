@@ -2,9 +2,9 @@ import { useEffect, useRef } from 'react';
 import { 
   Plus, Eye, Edit3, Copy, Link, Trash2, 
   Presentation, Image as ImageIcon, Video, Tags, 
-  FolderPlus, Layers
+  FolderPlus, Layers, Upload
 } from 'lucide-react';
-import { MediaItem } from '../MediaOrganizer';
+import { MediaItem } from '../../types/media';
 import { QuizActivity } from '../../types/quiz';
 
 export type ContextMenuTarget = 
@@ -31,7 +31,7 @@ interface MediaLibraryContextMenuProps {
   onEditQuiz: (quiz: QuizActivity) => void;
   onDuplicateQuiz: (quiz: QuizActivity) => void;
   onDeleteQuiz: (quiz: QuizActivity) => void;
-  onNavigateToMedia?: () => void;
+  onImportMedia?: () => void;
   onFilterChange?: (filter: 'all' | 'slide' | 'photo' | 'video' | 'quiz') => void;
 }
 
@@ -47,7 +47,7 @@ export default function MediaLibraryContextMenu({
   onEditQuiz,
   onDuplicateQuiz,
   onDeleteQuiz,
-  onNavigateToMedia,
+  onImportMedia,
   onFilterChange,
 }: MediaLibraryContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -274,16 +274,16 @@ export default function MediaLibraryContextMenu({
             </p>
           </div>
 
-          {onNavigateToMedia && (
+          {onImportMedia && (
             <button
               onClick={() => {
-                onNavigateToMedia();
+                onImportMedia();
                 onClose();
               }}
               className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-medium transition-colors cursor-pointer"
             >
-              <FolderPlus size={14} />
-              <span>Import / Manage Media</span>
+              <Upload size={14} />
+              <span>Import Media Files (.pptx, video, image)</span>
             </button>
           )}
 

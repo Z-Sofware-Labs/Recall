@@ -1,6 +1,6 @@
 [package]
 name = "recall"
-version = "1.0.1"
+version = "1.2.0"
 description = "Recall Desktop App"
 authors = ["Z Software Labs"]
 license = "MIT"
@@ -30,5 +30,7 @@ tauri-plugin-window-state = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 base64 = "0.22"
+sha2 = "0.10"
+tempfile = "3.10"
 
 

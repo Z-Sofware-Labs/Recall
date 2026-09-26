@@ -543,26 +543,34 @@ export default function Identification({ initialData, onBack, onSaveToCourse }: 
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Activity Title / Topic Prompt
+                <label 
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  ACTIVITY NAME
                 </label>
                 <input
                   type="text"
                   value={titlePrompt}
                   onChange={(e) => setTitlePrompt(e.target.value)}
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
                   placeholder="e.g. Key Concept Term Identification"
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Student Instructions
+                <label 
+                  title="Write the general instructions for this activity in this box. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  OVERALL INSTRUCTION
                 </label>
                 <input
                   type="text"
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
+                  title="Write the general instructions for this activity in this box. (optional)"
                   placeholder="e.g. Type the term in the space provided."
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />

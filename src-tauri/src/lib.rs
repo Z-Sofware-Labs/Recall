@@ -21,10 +21,13 @@ pub fn run() {
       project::get_default_project_directory,
       project::get_cli_startup_file,
       project::open_in_browser,
+      project::cleanup_temporary_project_files,
       association::check_recall_file_association,
       association::register_recall_file_association,
       association::unregister_recall_file_association,
       media::load_media_data_url,
+      media::get_media_metadata,
+      media::copy_media_file_to_project,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

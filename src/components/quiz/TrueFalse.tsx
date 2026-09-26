@@ -5,7 +5,7 @@ import {
   Save, X, Check, HelpCircle, ShieldAlert,
   Plus, Trash2, Sliders, ChevronLeft, ChevronRight,
   Layers, CheckSquare, Sparkles, Tag, Type, ClipboardList,
-  Undo2, Redo2
+  Undo2, Redo2, Underline
 } from 'lucide-react';
 import { scoreService } from '../../services/scoreService';
 import { TrueFalseQuestionItem, TrueFalseActivityData, QuizActivity } from '../../types/quiz';
@@ -314,13 +314,16 @@ export default function TrueFalse({ initialData, onBack, onSaveToCourse }: TrueF
       return <span>{statement}</span>;
     }
 
-    const regex = new RegExp(`(${underlinedWord.trim()})`, 'gi');
+    const trimmedWord = underlinedWord.trim();
+    // Escape special regex characters to prevent syntax errors
+    const escaped = trimmedWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
     const parts = statement.split(regex);
 
     return (
       <span>
         {parts.map((part, i) => {
-          if (part.toLowerCase() === underlinedWord.trim().toLowerCase()) {
+          if (part.toLowerCase() === trimmedWord.toLowerCase()) {
             return (
               <span
                 key={i}
@@ -334,6 +337,27 @@ export default function TrueFalse({ initialData, onBack, onSaveToCourse }: TrueF
         })}
       </span>
     );
+  };
+
+  // Underline selected text in statement
+  const handleUnderlineSelection = (qId: string) => {
+    const input = document.getElementById(`tf-statement-input-${qId}`) as HTMLInputElement | null;
+    if (!input) return;
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? 0;
+    const selected = input.value.substring(start, end).trim();
+
+    if (selected) {
+      handleUpdateQuestion(qId, 'underlinedWord', selected);
+    }
+  };
+
+  // Keyboard shortcut handler for statement input: Ctrl+U underlines selected text in statement
+  const handleStatementKeyDown = (qId: string, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
+      e.preventDefault();
+      handleUnderlineSelection(qId);
+    }
   };
 
   // Evaluation
@@ -607,26 +631,34 @@ export default function TrueFalse({ initialData, onBack, onSaveToCourse }: TrueF
             {/* Assessment Meta Inputs */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Assessment Title
+                <label 
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  ACTIVITY NAME
                 </label>
                 <input
                   type="text"
                   value={activityTitle}
                   onChange={(e) => setActivityTitle(e.target.value)}
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
                   placeholder="e.g. Fundamental Concepts True or False"
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Student Instructions
+                <label 
+                  title="Write the general instructions for this activity in this box. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  OVERALL INSTRUCTION
                 </label>
                 <input
                   type="text"
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
+                  title="Write the general instructions for this activity in this box. (optional)"
                   placeholder="e.g. Choose True or False for each statement below."
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
@@ -876,18 +908,69 @@ export default function TrueFalse({ initialData, onBack, onSaveToCourse }: TrueF
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                       Statement Text
                     </label>
-                    <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
-                      💡 Paste numbered statements (1., 2., 3.) directly here
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {tfMode === 'modified' && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleUnderlineSelection(q.id)}
+                          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:hover:bg-amber-900/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-lg cursor-pointer transition-colors shadow-xs"
+                          title="Underline currently selected/highlighted text in the statement (Ctrl+U)"
+                        >
+                          <Underline size={13} className="text-amber-600 dark:text-amber-400" />
+                          <span>Underline highlighted text</span>
+                          <kbd className="ml-1 px-1 py-0.5 bg-amber-100/80 dark:bg-amber-900/90 rounded border border-amber-300 dark:border-amber-700 text-[10px] font-mono font-bold">Ctrl+U</kbd>
+                        </button>
+                      )}
+                      <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
+                        💡 Paste numbered statements directly here
+                      </span>
+                    </div>
                   </div>
-                  <input
-                    type="text"
-                    value={q.statement}
-                    onChange={(e) => handleUpdateQuestion(q.id, 'statement', e.target.value)}
-                    onPaste={(e) => handleStatementPaste(q.id, qIndex, e)}
-                    placeholder="Enter the full statement text..."
-                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-hidden font-medium"
-                  />
+                  <div className="relative w-full rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950">
+                    {/* Synchronized text backdrop for showing underline in the statement box */}
+                    {tfMode === 'modified' && q.underlinedWord && (
+                      <div
+                        aria-hidden="true"
+                        className="absolute inset-0 px-3.5 py-2 text-sm font-medium pointer-events-none select-none overflow-hidden whitespace-pre-wrap break-words leading-normal text-transparent"
+                      >
+                        {(() => {
+                          const trimmedWord = q.underlinedWord.trim();
+                          if (!trimmedWord) return <span>{q.statement}</span>;
+                          const escaped = trimmedWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                          const regex = new RegExp(`(${escaped})`, 'gi');
+                          const parts = q.statement.split(regex);
+                          return (
+                            <span>
+                              {parts.map((part, i) => {
+                                if (part.toLowerCase() === trimmedWord.toLowerCase()) {
+                                  return (
+                                    <span
+                                      key={i}
+                                      className="underline decoration-blue-500 decoration-[2.5px] underline-offset-4 font-bold text-transparent bg-blue-100/60 dark:bg-blue-900/40 rounded-xs"
+                                    >
+                                      {part}
+                                    </span>
+                                  );
+                                }
+                                return <span key={i}>{part}</span>;
+                              })}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    <input
+                      id={`tf-statement-input-${q.id}`}
+                      type="text"
+                      value={q.statement}
+                      onChange={(e) => handleUpdateQuestion(q.id, 'statement', e.target.value)}
+                      onPaste={(e) => handleStatementPaste(q.id, qIndex, e)}
+                      onKeyDown={(e) => handleStatementKeyDown(q.id, e)}
+                      placeholder="Enter the full statement text..."
+                      className="relative z-10 w-full px-3.5 py-2 bg-transparent text-slate-900 dark:text-white text-sm font-medium outline-hidden leading-normal"
+                    />
+                  </div>
                 </div>
 
                 {/* Modified Mode Configuration */}
@@ -903,56 +986,52 @@ export default function TrueFalse({ initialData, onBack, onSaveToCourse }: TrueF
                       </span>
                       <span className="text-[11px] text-slate-500">
                         {q.isTrue 
-                          ? '(Specify which key word or phrase in the true statement to underline)' 
-                          : '(Specify which word to underline and what the correct replacement word is)'}
+                          ? '(Highlight text above and click "Underline highlighted text" or press Ctrl+U)' 
+                          : '(Underline false key text above, then specify the correct replacement word)'}
                       </span>
                     </div>
 
-                    <div className={`grid grid-cols-1 ${!q.isTrue ? 'md:grid-cols-2' : ''} gap-4`}>
+                    {!q.isTrue && (
                       <div className="space-y-1.5">
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          Word in Statement to Underline
+                          Correct Replacement Word (Canonical Answer)
                         </label>
                         <input
                           type="text"
-                          value={q.underlinedWord || ''}
-                          onChange={(e) => handleUpdateQuestion(q.id, 'underlinedWord', e.target.value)}
-                          placeholder={q.isTrue ? "e.g. photovoltaic" : "e.g. boilers"}
-                          className={`w-full px-3 py-1.5 bg-white dark:bg-slate-900 border rounded-lg text-xs font-bold text-slate-900 dark:text-white outline-hidden focus:ring-2 ${
-                            !q.isTrue 
-                              ? 'border-rose-300 dark:border-rose-800 focus:ring-rose-500' 
-                              : 'border-emerald-300 dark:border-emerald-800 focus:ring-emerald-500'
-                          }`}
+                          value={q.replacementAnswer || ''}
+                          onChange={(e) => handleUpdateQuestion(q.id, 'replacementAnswer', e.target.value)}
+                          placeholder="e.g. penstocks"
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs font-bold text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                         />
                       </div>
-
-                      {!q.isTrue && (
-                        <div className="space-y-1.5">
-                          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                            Correct Replacement Word (Canonical Answer)
-                          </label>
-                          <input
-                            type="text"
-                            value={q.replacementAnswer || ''}
-                            onChange={(e) => handleUpdateQuestion(q.id, 'replacementAnswer', e.target.value)}
-                            placeholder="e.g. penstocks"
-                            className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs font-bold text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
-                          />
-                        </div>
-                      )}
-                    </div>
+                    )}
 
                     {/* Statement Preview with Underline */}
-                    {q.underlinedWord && (
-                      <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs space-y-1">
+                    <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                           Student Preview (Underlined Statement):
                         </span>
-                        <p className="text-slate-800 dark:text-slate-200 font-medium">
-                          {renderStatementWithUnderline(q.statement, q.underlinedWord)}
-                        </p>
+                        {q.underlinedWord && (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateQuestion(q.id, 'underlinedWord', '')}
+                            className="text-[11px] text-rose-500 hover:text-rose-600 font-semibold cursor-pointer transition-colors"
+                          >
+                            ✕ Remove underline
+                          </button>
+                        )}
                       </div>
-                    )}
+                      <p className="text-slate-800 dark:text-slate-200 font-medium">
+                        {q.underlinedWord ? (
+                          renderStatementWithUnderline(q.statement, q.underlinedWord)
+                        ) : (
+                          <span className="text-slate-400 italic">
+                            No text underlined yet. Highlight text in the statement and press Ctrl+U or click "Underline highlighted text".
+                          </span>
+                        )}
+                      </p>
+                    </div>
 
                     {/* Acceptable Synonyms (Only for False statements that require replacement input) */}
                     {!q.isTrue && (
@@ -1443,7 +1522,7 @@ export default function TrueFalse({ initialData, onBack, onSaveToCourse }: TrueF
                 </div>
                 <p>• Automatically parses question numbers (<code className="text-blue-600 dark:text-blue-400 font-mono">1.</code>, <code className="text-blue-600 dark:text-blue-400 font-mono">1)</code>, bullets, or plain lines).</p>
                 <p>• Automatically detects truth indicators like <code className="text-emerald-600 dark:text-emerald-400 font-mono">- True</code>, <code className="text-rose-600 dark:text-rose-400 font-mono">(False)</code>, <code className="text-emerald-600 dark:text-emerald-400 font-mono">- Tama</code>, <code className="text-rose-600 dark:text-rose-400 font-mono">(Mali)</code>.</p>
-                <p>• For modified True/False, mark underlined words with <code className="text-blue-600 dark:text-blue-400 font-mono">_word_</code> or <code className="text-blue-600 dark:text-blue-400 font-mono">*word*</code> and replacement answers with <code className="text-blue-600 dark:text-blue-400 font-mono">-&gt; replacement</code>.</p>
+                <p>• For modified True/False, mark underlined words with <code className="text-blue-600 dark:text-blue-400 font-mono">&lt;u&gt;word&lt;/u&gt;</code>, <code className="text-blue-600 dark:text-blue-400 font-mono">_word_</code>, <code className="text-blue-600 dark:text-blue-400 font-mono">*word*</code>, or <code className="text-blue-600 dark:text-blue-400 font-mono">[word]</code>, and replacement answers with <code className="text-blue-600 dark:text-blue-400 font-mono">-&gt; replacement</code>.</p>
               </div>
             </div>
 

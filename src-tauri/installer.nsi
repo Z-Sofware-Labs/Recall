@@ -695,7 +695,7 @@ Section Install
   ${If} $AssociateRecallCheckboxState == 1
   ${OrIf} ${Silent}
   ${OrIf} $PassiveMode = 1
-    !insertmacro APP_ASSOCIATE "recall" "Recall Project File" "Recall Course Project File" "$INSTDIR\recall-doc.ico,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
+    !insertmacro APP_ASSOCIATE "recall" "Recall Project File" "Recall Course Project File" "$INSTDIR\recall-doc.ico,0" "Open with ${PRODUCTNAME}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
   ${Else}
     DetailPrint "User chose not to associate file types. Skipping association."
     !insertmacro APP_UNASSOCIATE "recall" "Recall Project File"

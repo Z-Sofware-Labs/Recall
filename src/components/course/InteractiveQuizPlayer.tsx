@@ -172,9 +172,13 @@ export default function InteractiveQuizPlayer({
   const [ddAnswers, setDdAnswers] = useState<Record<string, string>>({}); // questionId -> optionId
 
   // 5. Enumeration state
+  const [enumActiveQuestionIndex, setEnumActiveQuestionIndex] = useState<number>(0);
+  const [enumerationAnswersMap, setEnumerationAnswersMap] = useState<Record<string, string[]>>({});
   const [enumerationAnswers, setEnumerationAnswers] = useState<string[]>([]);
 
   // 6. Sequencing state
+  const [seqActiveQuestionIndex, setSeqActiveQuestionIndex] = useState<number>(0);
+  const [seqQuestionsMap, setSeqQuestionsMap] = useState<Record<string, { id: string; text: string; correctOrder: number }[]>>({});
   const [sequenceItems, setSequenceItems] = useState<{ id: string; text: string; correctOrder: number }[]>([]);
   const [seqDragIndex, setSeqDragIndex] = useState<number | null>(null);
   const [seqDropTargetIndex, setSeqDropTargetIndex] = useState<number | null>(null);
@@ -184,7 +188,7 @@ export default function InteractiveQuizPlayer({
   const seqDropTargetIndexRef = useRef<number | null>(null);
   const isSeqDraggingRef = useRef(false);
 
-  const handlePointerDownSeqDrag = (e: ReactPointerEvent, index: number) => {
+  const handlePointerDownSeqDrag = (e: ReactPointerEvent, index: number, activeQId?: string) => {
     if (hasChecked) return;
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
@@ -192,7 +196,8 @@ export default function InteractiveQuizPlayer({
 
     e.preventDefault();
     isSeqDraggingRef.current = true;
-    const item = sequenceItems[index];
+    const currentList = activeQId && seqQuestionsMap[activeQId] ? seqQuestionsMap[activeQId] : sequenceItems;
+    const item = currentList[index];
 
     seqDragIndexRef.current = index;
     seqDropTargetIndexRef.current = index;
@@ -240,13 +245,23 @@ export default function InteractiveQuizPlayer({
       const toIdx = seqDropTargetIndexRef.current;
 
       if (fromIdx !== null && toIdx !== null && fromIdx !== toIdx) {
-        setSequenceItems((prev) => {
-          const list = [...prev];
-          const temp = list[fromIdx];
-          list[fromIdx] = list[toIdx];
-          list[toIdx] = temp;
-          return list;
-        });
+        if (activeQId && seqQuestionsMap[activeQId]) {
+          setSeqQuestionsMap((prev) => {
+            const list = [...(prev[activeQId] || [])];
+            const temp = list[fromIdx];
+            list[fromIdx] = list[toIdx];
+            list[toIdx] = temp;
+            return { ...prev, [activeQId]: list };
+          });
+        } else {
+          setSequenceItems((prev) => {
+            const list = [...prev];
+            const temp = list[fromIdx];
+            list[fromIdx] = list[toIdx];
+            list[toIdx] = temp;
+            return list;
+          });
+        }
       }
 
       seqDragIndexRef.current = null;
@@ -488,14 +503,34 @@ export default function InteractiveQuizPlayer({
 
     // Setup initial enumeration slots
     if (quiz.type === 'Enumeration') {
-      const count = quiz.data?.enumeration?.itemCount || quiz.data?.enumeration?.items?.length || 3;
-      setEnumerationAnswers(Array(count).fill(''));
+      const qList = quiz.data?.enumeration?.questions;
+      if (qList && qList.length > 0) {
+        const initialMap: Record<string, string[]> = {};
+        qList.forEach(q => {
+          initialMap[q.id] = Array(q.items.length).fill('');
+        });
+        setEnumerationAnswersMap(initialMap);
+      } else {
+        const count = quiz.data?.enumeration?.itemCount || quiz.data?.enumeration?.items?.length || 3;
+        setEnumerationAnswers(Array(count).fill(''));
+      }
+      setEnumActiveQuestionIndex(0);
     }
 
     // Setup initial sequencing items (shuffled)
-    if (quiz.type === 'Sequencing' && quiz.data?.sequencing?.steps) {
-      const steps = [...quiz.data.sequencing.steps];
-      setSequenceItems([...steps].sort(() => Math.random() - 0.5));
+    if (quiz.type === 'Sequencing') {
+      const seqQuestions = quiz.data?.sequencing?.questions;
+      if (seqQuestions && seqQuestions.length > 0) {
+        const initialMap: Record<string, { id: string; text: string; correctOrder: number }[]> = {};
+        seqQuestions.forEach(q => {
+          initialMap[q.id] = [...q.steps].sort(() => Math.random() - 0.5);
+        });
+        setSeqQuestionsMap(initialMap);
+      } else if (quiz.data?.sequencing?.steps) {
+        const steps = [...quiz.data.sequencing.steps];
+        setSequenceItems([...steps].sort(() => Math.random() - 0.5));
+      }
+      setSeqActiveQuestionIndex(0);
     }
 
     setCategorizedItems({});
@@ -926,57 +961,157 @@ export default function InteractiveQuizPlayer({
 
   // 5. Enumeration Evaluation
   const handleCheckEnumeration = () => {
-    const items = quiz.data?.enumeration?.items || [];
+    const qList = quiz.data?.enumeration?.questions;
     let correctMatches = 0;
+    let totalItems = 0;
     const detailedResults: any[] = [];
 
-    items.forEach((item, index) => {
-      const studentAns = enumerationAnswers[index] || '';
-      const clean = studentAns.trim().toLowerCase();
-      const matched = clean !== '' && items.some(k => {
-        const p = k.primaryAnswer.trim().toLowerCase();
-        const a = (k.acceptableAliases || []).map(alias => alias.trim().toLowerCase());
-        return p === clean || a.includes(clean);
-      });
-      if (matched) correctMatches++;
+    if (qList && qList.length > 0) {
+      qList.forEach((q, qIdx) => {
+        const qAnswers = enumerationAnswersMap[q.id] || [];
+        totalItems += q.items.length;
 
-      detailedResults.push({
-        questionText: `List item #${index + 1}:`,
-        isCorrect: matched,
-        userAnswer: studentAns || 'No answer',
-        correctAnswer: item.primaryAnswer,
-        explanation: item.explanation
+        q.items.forEach((item, index) => {
+          const studentAns = qAnswers[index] || '';
+          const clean = studentAns.trim().toLowerCase();
+          const matched = clean !== '' && q.items.some(k => {
+            const p = k.primaryAnswer.trim().toLowerCase();
+            const a = (k.acceptableAliases || []).map(alias => alias.trim().toLowerCase());
+            return p === clean || a.includes(clean);
+          });
+          if (matched) correctMatches++;
+
+          detailedResults.push({
+            questionText: `${q.prompt || `Q#${qIdx + 1}`} - Item #${index + 1}:`,
+            isCorrect: matched,
+            userAnswer: studentAns || 'No answer',
+            correctAnswer: item.primaryAnswer,
+            explanation: item.explanation
+          });
+        });
       });
-    });
+    } else {
+      const items = quiz.data?.enumeration?.items || [];
+      totalItems = items.length;
+
+      items.forEach((item, index) => {
+        const studentAns = enumerationAnswers[index] || '';
+        const clean = studentAns.trim().toLowerCase();
+        const matched = clean !== '' && items.some(k => {
+          const p = k.primaryAnswer.trim().toLowerCase();
+          const a = (k.acceptableAliases || []).map(alias => alias.trim().toLowerCase());
+          return p === clean || a.includes(clean);
+        });
+        if (matched) correctMatches++;
+
+        detailedResults.push({
+          questionText: `List item #${index + 1}:`,
+          isCorrect: matched,
+          userAnswer: studentAns || 'No answer',
+          correctAnswer: item.primaryAnswer,
+          explanation: item.explanation
+        });
+      });
+    }
 
     const totalPoints = quiz.totalPoints || 5;
-    const isPassed = correctMatches >= Math.ceil(items.length * 0.7);
-    const earned = Math.round((correctMatches / Math.max(1, items.length)) * totalPoints);
+    const isPassed = correctMatches >= Math.ceil(totalItems * 0.7);
+    const earned = Math.round((correctMatches / Math.max(1, totalItems)) * totalPoints);
 
     finishOverallEvaluation(
       isPassed,
       earned,
       totalPoints,
       correctMatches,
-      items.length - correctMatches,
-      `${correctMatches} of ${items.length} items identified correctly (+${earned} pts).`,
+      totalItems - correctMatches,
+      `${correctMatches} of ${totalItems} items identified correctly (+${earned} pts).`,
       detailedResults
     );
   };
 
   // 6. Sequencing Evaluation
-  const handleMoveSequenceStep = (index: number, direction: 'up' | 'down') => {
+  const handleMoveSequenceStep = (index: number, direction: 'up' | 'down', activeQId?: string) => {
     if (hasChecked) return;
-    const newIdx = direction === 'up' ? index - 1 : index + 1;
-    if (newIdx < 0 || newIdx >= sequenceItems.length) return;
-    const updated = [...sequenceItems];
-    const temp = updated[index];
-    updated[index] = updated[newIdx];
-    updated[newIdx] = temp;
-    setSequenceItems(updated);
+    if (activeQId && seqQuestionsMap[activeQId]) {
+      const currentList = seqQuestionsMap[activeQId];
+      const newIdx = direction === 'up' ? index - 1 : index + 1;
+      if (newIdx < 0 || newIdx >= currentList.length) return;
+      const updated = [...currentList];
+      const temp = updated[index];
+      updated[index] = updated[newIdx];
+      updated[newIdx] = temp;
+      setSeqQuestionsMap(prev => ({ ...prev, [activeQId]: updated }));
+    } else {
+      const newIdx = direction === 'up' ? index - 1 : index + 1;
+      if (newIdx < 0 || newIdx >= sequenceItems.length) return;
+      const updated = [...sequenceItems];
+      const temp = updated[index];
+      updated[index] = updated[newIdx];
+      updated[newIdx] = temp;
+      setSequenceItems(updated);
+    }
   };
 
   const handleCheckSequencing = () => {
+    const seqQuestions = quiz.data?.sequencing?.questions;
+    const deduction = quiz.deductionPerMistake ?? 0;
+    const pointsPerQ = quiz.pointsPerCorrect ?? 5;
+
+    if (seqQuestions && seqQuestions.length > 0) {
+      let earned = 0;
+      let correctQuestionsCount = 0;
+      let totalMistakes = 0;
+      const totalPossible = seqQuestions.length * pointsPerQ;
+      const detailedResults: any[] = [];
+
+      seqQuestions.forEach((q, qIdx) => {
+        const studentSteps = seqQuestionsMap[q.id] || [];
+        let correctStepPositions = 0;
+        studentSteps.forEach((step, idx) => {
+          if (step.correctOrder === idx + 1) {
+            correctStepPositions += 1;
+          }
+        });
+
+        const isQuestionCorrect = correctStepPositions === q.steps.length;
+        const qMistakes = q.steps.length - correctStepPositions;
+        totalMistakes += qMistakes;
+
+        if (isQuestionCorrect) {
+          correctQuestionsCount += 1;
+          earned += pointsPerQ;
+        } else if (deduction > 0) {
+          earned = Math.max(0, earned - (qMistakes * deduction));
+        }
+
+        const orderedSteps = [...q.steps].sort((a, b) => a.correctOrder - b.correctOrder);
+        detailedResults.push({
+          questionText: q.prompt || `Question #${qIdx + 1}`,
+          isCorrect: isQuestionCorrect,
+          userAnswer: studentSteps.map((s, i) => `${i + 1}. ${s.text}`).join(' | '),
+          correctAnswer: orderedSteps.map((s, i) => `${i + 1}. ${s.text}`).join(' | '),
+          explanation: q.explanation || (isQuestionCorrect ? 'Correct sequence order.' : `${correctStepPositions}/${q.steps.length} steps in correct order.`),
+        });
+      });
+
+      const passThreshold = quiz.passingScore !== undefined ? quiz.passingScore : Math.ceil(totalPossible * 0.7);
+      const isPassed = !quiz.isGraded || earned >= passThreshold;
+
+      finishOverallEvaluation(
+        isPassed,
+        earned,
+        totalPossible,
+        correctQuestionsCount,
+        seqQuestions.length - correctQuestionsCount,
+        isPassed
+          ? `Passed! ${correctQuestionsCount} of ${seqQuestions.length} questions sequenced correctly (+${earned} pts).`
+          : `Assessment incomplete: ${correctQuestionsCount} of ${seqQuestions.length} questions sequenced correctly.`,
+        detailedResults
+      );
+      return;
+    }
+
+    // Single-question legacy fallback
     let correctCount = 0;
     sequenceItems.forEach((step, idx) => {
       if (step.correctOrder === idx + 1) {
@@ -986,7 +1121,6 @@ export default function InteractiveQuizPlayer({
 
     const isCorrect = correctCount === sequenceItems.length;
     const totalPoints = quiz.totalPoints ?? (quiz.pointsPerCorrect ?? 5);
-    const deduction = quiz.deductionPerMistake ?? 0;
     const mistakes = sequenceItems.length - correctCount;
 
     let earned = 0;
@@ -995,7 +1129,6 @@ export default function InteractiveQuizPlayer({
     } else if (deduction > 0) {
       earned = Math.max(0, totalPoints - (mistakes * deduction));
     } else {
-      // Partial proportional scoring fallback if configured points > 1
       earned = Math.round((correctCount / Math.max(1, sequenceItems.length)) * totalPoints);
     }
 
@@ -2027,120 +2160,402 @@ export default function InteractiveQuizPlayer({
       {/* ========================================================================= */}
       {/* 5. ENUMERATION */}
       {/* ========================================================================= */}
-      {quiz.type === 'Enumeration' && (
-        <div className="space-y-3">
-          <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800">
-            <p className="text-sm font-bold text-slate-900 dark:text-white">{quiz.prompt || 'List all required items:'}</p>
-            {quiz.instructions && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic">{quiz.instructions}</p>}
-          </div>
-          <div className="space-y-2">
-            {enumerationAnswers.map((ans, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center shrink-0">
-                  {idx + 1}
+      {/* ========================================================================= */}
+      {/* 5. ENUMERATION */}
+      {/* ========================================================================= */}
+      {quiz.type === 'Enumeration' && (() => {
+        const qList = quiz.data?.enumeration?.questions;
+        if (qList && qList.length > 0) {
+          const currentQ = qList[enumActiveQuestionIndex] || qList[0];
+          const currentAnswers = enumerationAnswersMap[currentQ.id] || [];
+
+          return (
+            <div className="space-y-4 max-w-xl mx-auto w-full">
+              {/* Question Stepper / Navigation when multiple questions exist */}
+              {qList.length > 1 && (
+                <div className="flex items-center justify-between gap-2 p-2 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-1.5 overflow-x-auto">
+                    {qList.map((q, idx) => {
+                      const ansList = enumerationAnswersMap[q.id] || [];
+                      const isFilled = ansList.filter(a => (a || '').trim().length > 0).length === q.items.length;
+                      const isActive = enumActiveQuestionIndex === idx;
+
+                      return (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() => setEnumActiveQuestionIndex(idx)}
+                          className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : isFilled
+                              ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
+                              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                          }`}
+                        >
+                          {idx + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-500 px-1">
+                      Question {enumActiveQuestionIndex + 1} of {qList.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={enumActiveQuestionIndex === 0}
+                      onClick={() => setEnumActiveQuestionIndex(prev => Math.max(0, prev - 1))}
+                      className="p-1 rounded text-slate-500 hover:bg-white dark:hover:bg-slate-900 disabled:opacity-30 cursor-pointer text-xs"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      disabled={enumActiveQuestionIndex === qList.length - 1}
+                      onClick={() => setEnumActiveQuestionIndex(prev => Math.min(qList.length - 1, prev + 1))}
+                      className="p-1 rounded text-slate-500 hover:bg-white dark:hover:bg-slate-900 disabled:opacity-30 cursor-pointer text-xs"
+                    >
+                      ›
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Single Active Question Prompt */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                  Question #{enumActiveQuestionIndex + 1}
                 </span>
-                <input
-                  type="text"
-                  disabled={hasChecked}
-                  value={ans}
-                  onChange={(e) => {
-                    const next = [...enumerationAnswers];
-                    next[idx] = e.target.value;
-                    setEnumerationAnswers(next);
-                  }}
-                  placeholder={`Item #${idx + 1}`}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
-                />
+                <p className="text-sm font-bold text-slate-900 dark:text-white leading-relaxed">
+                  {currentQ.prompt || quiz.prompt || 'List all required items:'}
+                </p>
+                {quiz.instructions && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 italic">{quiz.instructions}</p>
+                )}
               </div>
-            ))}
+
+              {/* Numbered input fields for current active question only */}
+              <div className="space-y-2">
+                {currentQ.items.map((_, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <input
+                      type="text"
+                      disabled={hasChecked}
+                      value={currentAnswers[idx] || ''}
+                      onChange={(e) => {
+                        const next = [...currentAnswers];
+                        next[idx] = e.target.value;
+                        setEnumerationAnswersMap(prev => ({ ...prev, [currentQ.id]: next }));
+                      }}
+                      placeholder={`Item #${idx + 1}`}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* In-card question navigation */}
+              {qList.length > 1 && (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    disabled={enumActiveQuestionIndex === 0}
+                    onClick={() => setEnumActiveQuestionIndex(prev => Math.max(0, prev - 1))}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                  >
+                    ← Previous Question
+                  </button>
+                  <button
+                    type="button"
+                    disabled={enumActiveQuestionIndex === qList.length - 1}
+                    onClick={() => setEnumActiveQuestionIndex(prev => Math.min(qList.length - 1, prev + 1))}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                  >
+                    Next Question →
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // Single-question legacy fallback
+        return (
+          <div className="space-y-3">
+            <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800">
+              <p className="text-sm font-bold text-slate-900 dark:text-white">{quiz.prompt || 'List all required items:'}</p>
+              {quiz.instructions && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic">{quiz.instructions}</p>}
+            </div>
+            <div className="space-y-2">
+              {enumerationAnswers.map((ans, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center shrink-0">
+                    {idx + 1}
+                  </span>
+                  <input
+                    type="text"
+                    disabled={hasChecked}
+                    value={ans}
+                    onChange={(e) => {
+                      const next = [...enumerationAnswers];
+                      next[idx] = e.target.value;
+                      setEnumerationAnswers(next);
+                    }}
+                    placeholder={`Item #${idx + 1}`}
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================================= */}
       {/* 6. SEQUENCING */}
       {/* ========================================================================= */}
-      {quiz.type === 'Sequencing' && (
-        <div className="space-y-3 select-none">
-          <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800">
-            <p className="text-sm font-bold text-slate-900 dark:text-white">{quiz.prompt || 'Arrange the steps in the correct order:'}</p>
-            {quiz.instructions && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic">{quiz.instructions}</p>}
-          </div>
-          <div className="space-y-2">
-            {sequenceItems.map((step, idx) => {
-              const isBeingDragged = seqDragIndex === idx;
-              const isTarget = seqDropTargetIndex === idx && seqDragIndex !== null && seqDragIndex !== idx;
+      {quiz.type === 'Sequencing' && (() => {
+        const seqQuestions = quiz.data?.sequencing?.questions;
 
-              return (
-                <div
-                  key={step.id}
-                  data-preview-seq-index={idx}
-                  onPointerDown={(e) => handlePointerDownSeqDrag(e, idx)}
-                  className={`p-3.5 border rounded-xl flex items-center justify-between gap-3 shadow-2xs transition-all touch-none ${
-                    !hasChecked ? 'cursor-grab active:cursor-grabbing' : ''
-                  } ${
-                    isTarget
-                      ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-950/60 ring-2 ring-blue-400/40 scale-[1.01]'
-                      : isBeingDragged
-                        ? 'opacity-30 border-dashed border-slate-400 bg-slate-100 dark:bg-slate-900'
-                        : hasChecked
-                          ? step.correctOrder === idx + 1
-                            ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30'
-                            : 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/30'
-                          : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-blue-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    {!hasChecked && (
-                      <div className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 shrink-0">
-                        <GripVertical size={16} />
-                      </div>
-                    )}
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-600 font-bold text-xs flex items-center justify-center shrink-0">
-                      {idx + 1}
+        if (seqQuestions && seqQuestions.length > 0) {
+          const currentQ = seqQuestions[seqActiveQuestionIndex] || seqQuestions[0];
+          const currentSteps = seqQuestionsMap[currentQ.id] || [];
+
+          return (
+            <div className="space-y-3 select-none">
+              {/* Question Navigation Header if multi-question */}
+              {seqQuestions.length > 1 && (
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                    Sequencing Challenge
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-500 px-1">
+                      Question {seqActiveQuestionIndex + 1} of {seqQuestions.length}
                     </span>
-                    <span className="text-xs sm:text-sm font-medium text-slate-900 dark:text-white break-words whitespace-normal leading-relaxed flex-1">
-                      {step.text}
-                    </span>
+                    <button
+                      type="button"
+                      disabled={seqActiveQuestionIndex === 0}
+                      onClick={() => setSeqActiveQuestionIndex(prev => Math.max(0, prev - 1))}
+                      className="p-1 rounded text-slate-500 hover:bg-white dark:hover:bg-slate-900 disabled:opacity-30 cursor-pointer text-xs"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      disabled={seqActiveQuestionIndex === seqQuestions.length - 1}
+                      onClick={() => setSeqActiveQuestionIndex(prev => Math.min(seqQuestions.length - 1, prev + 1))}
+                      className="p-1 rounded text-slate-500 hover:bg-white dark:hover:bg-slate-900 disabled:opacity-30 cursor-pointer text-xs"
+                    >
+                      ›
+                    </button>
                   </div>
-                  {!hasChecked ? (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        disabled={idx === 0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleMoveSequenceStep(idx, 'up');
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer text-slate-500"
-                        title="Move Up"
-                      >
-                        ▲
-                      </button>
-                      <button
-                        type="button"
-                        disabled={idx === sequenceItems.length - 1}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleMoveSequenceStep(idx, 'down');
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer text-slate-500"
-                        title="Move Down"
-                      >
-                        ▼
-                      </button>
-                    </div>
-                  ) : step.correctOrder !== idx + 1 && (
-                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold shrink-0">
-                      Correct: #{step.correctOrder}
-                    </span>
-                  )}
                 </div>
-              );
-            })}
+              )}
+
+              {/* Question prompt & instructions */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
+                {seqQuestions.length > 1 && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                    Question #{seqActiveQuestionIndex + 1}
+                  </span>
+                )}
+                <p className="text-sm font-bold text-slate-900 dark:text-white leading-relaxed">
+                  {currentQ.prompt || quiz.prompt || 'Arrange the steps in the correct order:'}
+                </p>
+                {quiz.instructions && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 italic">{quiz.instructions}</p>
+                )}
+              </div>
+
+              {/* Draggable Sequence Cards */}
+              <div className="space-y-2">
+                {currentSteps.map((step, idx) => {
+                  const isBeingDragged = seqDragIndex === idx;
+                  const isTarget = seqDropTargetIndex === idx && seqDragIndex !== null && seqDragIndex !== idx;
+
+                  return (
+                    <div
+                      key={step.id}
+                      data-preview-seq-index={idx}
+                      onPointerDown={(e) => handlePointerDownSeqDrag(e, idx, currentQ.id)}
+                      className={`p-3.5 border rounded-xl flex items-center justify-between gap-3 shadow-2xs transition-all touch-none ${
+                        !hasChecked ? 'cursor-grab active:cursor-grabbing' : ''
+                      } ${
+                        isTarget
+                          ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-950/60 ring-2 ring-blue-400/40 scale-[1.01]'
+                          : isBeingDragged
+                            ? 'opacity-30 border-dashed border-slate-400 bg-slate-100 dark:bg-slate-900'
+                            : hasChecked
+                              ? step.correctOrder === idx + 1
+                                ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30'
+                                : 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/30'
+                              : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-blue-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        {!hasChecked && (
+                          <div className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 shrink-0">
+                            <GripVertical size={16} />
+                          </div>
+                        )}
+                        <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-600 font-bold text-xs flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
+                        <span className="text-xs sm:text-sm font-medium text-slate-900 dark:text-white break-words whitespace-normal leading-relaxed flex-1">
+                          {step.text}
+                        </span>
+                      </div>
+                      {!hasChecked ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMoveSequenceStep(idx, 'up', currentQ.id);
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer text-slate-500"
+                            title="Move Up"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === currentSteps.length - 1}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMoveSequenceStep(idx, 'down', currentQ.id);
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer text-slate-500"
+                            title="Move Down"
+                          >
+                            ▼
+                          </button>
+                        </div>
+                      ) : step.correctOrder !== idx + 1 && (
+                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold shrink-0">
+                          Correct: #{step.correctOrder}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* In-card question pagination buttons */}
+              {seqQuestions.length > 1 && (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    disabled={seqActiveQuestionIndex === 0}
+                    onClick={() => setSeqActiveQuestionIndex(prev => Math.max(0, prev - 1))}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                  >
+                    ← Previous Question
+                  </button>
+                  <button
+                    type="button"
+                    disabled={seqActiveQuestionIndex === seqQuestions.length - 1}
+                    onClick={() => setSeqActiveQuestionIndex(prev => Math.min(seqQuestions.length - 1, prev + 1))}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                  >
+                    Next Question →
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // Single-question legacy fallback
+        return (
+          <div className="space-y-3 select-none">
+            <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800">
+              <p className="text-sm font-bold text-slate-900 dark:text-white">{quiz.prompt || 'Arrange the steps in the correct order:'}</p>
+              {quiz.instructions && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic">{quiz.instructions}</p>}
+            </div>
+            <div className="space-y-2">
+              {sequenceItems.map((step, idx) => {
+                const isBeingDragged = seqDragIndex === idx;
+                const isTarget = seqDropTargetIndex === idx && seqDragIndex !== null && seqDragIndex !== idx;
+
+                return (
+                  <div
+                    key={step.id}
+                    data-preview-seq-index={idx}
+                    onPointerDown={(e) => handlePointerDownSeqDrag(e, idx)}
+                    className={`p-3.5 border rounded-xl flex items-center justify-between gap-3 shadow-2xs transition-all touch-none ${
+                      !hasChecked ? 'cursor-grab active:cursor-grabbing' : ''
+                    } ${
+                      isTarget
+                        ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-950/60 ring-2 ring-blue-400/40 scale-[1.01]'
+                        : isBeingDragged
+                          ? 'opacity-30 border-dashed border-slate-400 bg-slate-100 dark:bg-slate-900'
+                          : hasChecked
+                            ? step.correctOrder === idx + 1
+                              ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30'
+                              : 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/30'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-blue-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      {!hasChecked && (
+                        <div className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 shrink-0">
+                          <GripVertical size={16} />
+                        </div>
+                      )}
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-600 font-bold text-xs flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <span className="text-xs sm:text-sm font-medium text-slate-900 dark:text-white break-words whitespace-normal leading-relaxed flex-1">
+                        {step.text}
+                      </span>
+                    </div>
+                    {!hasChecked ? (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMoveSequenceStep(idx, 'up');
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer text-slate-500"
+                          title="Move Up"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === sequenceItems.length - 1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMoveSequenceStep(idx, 'down');
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer text-slate-500"
+                          title="Move Down"
+                        >
+                          ▼
+                        </button>
+                      </div>
+                    ) : step.correctOrder !== idx + 1 && (
+                      <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold shrink-0">
+                        Correct: #{step.correctOrder}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================================= */}
       {/* 7. CLICK AN IMAGE — per-hotspot question mode */}

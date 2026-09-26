@@ -1,15 +1,19 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use tempfile::TempDir;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+const DEFAULT_OFFICE_TIMEOUT_SECS: u64 = 90;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OfficeSuiteInfo {
@@ -23,7 +27,7 @@ pub struct OfficeSuiteInfo {
 
 static CACHED_OFFICE_INFO: OnceLock<OfficeSuiteInfo> = OnceLock::new();
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SlideImage {
     pub index: usize,
     pub name: String,
@@ -37,6 +41,30 @@ fn clean_path_str(p: &Path) -> String {
         s[4..].to_string()
     } else {
         s
+    }
+}
+
+/// Helper that runs a child process with a timeout, terminating the child if it exceeds the limit.
+fn run_command_with_timeout(mut child: Child, timeout: Duration) -> Result<std::process::Output, String> {
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                return child.wait_with_output().map_err(|e| format!("Failed to collect output: {}", e));
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("Process timed out after {} seconds and was terminated", timeout.as_secs()));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                return Err(format!("Error monitoring process: {}", e));
+            }
+        }
     }
 }
 
@@ -56,7 +84,6 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
 
     #[cfg(target_os = "windows")]
     {
-        // 1. Fast direct file-existence check for common MS PowerPoint paths
         let potential_ms = [
             r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
             r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE",
@@ -76,7 +103,6 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
             }
         }
 
-        // If not found in standard paths, run silent PowerShell COM check without showing any window
         if !has_ms {
             let mut ps_cmd = Command::new("powershell");
             ps_cmd.args([
@@ -88,18 +114,19 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
             ]);
             ps_cmd.creation_flags(CREATE_NO_WINDOW);
 
-            if let Ok(output) = ps_cmd.output() {
-                if output.status.success() {
-                    let ver = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !ver.is_empty() {
-                        has_ms = true;
-                        ms_ver = Some(ver);
+            if let Ok(child) = ps_cmd.spawn() {
+                if let Ok(output) = run_command_with_timeout(child, Duration::from_secs(10)) {
+                    if output.status.success() {
+                        let ver = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        if !ver.is_empty() {
+                            has_ms = true;
+                            ms_ver = Some(ver);
+                        }
                     }
                 }
             }
         }
 
-        // Check LibreOffice standard locations
         let potential_lo = [
             r"C:\Program Files\LibreOffice\program\soffice.exe",
             r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
@@ -132,24 +159,55 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
 
     #[cfg(target_os = "macos")]
     {
-        // Check MS Office on macOS
-        let ms_app = "/Applications/Microsoft PowerPoint.app";
-        if Path::new(ms_app).exists() {
-            has_ms = true;
-            ms_ver = Some("Installed".to_string());
+        // Robust macOS check: System-wide and Per-User directories
+        let mut home_apps = PathBuf::from("/");
+        if let Ok(h) = std::env::var("HOME") {
+            home_apps = Path::new(&h).join("Applications");
         }
 
-        // Check LibreOffice on macOS
-        let lo_app = "/Applications/LibreOffice.app/Contents/MacOS/soffice";
-        if Path::new(lo_app).exists() {
-            has_lo = true;
-            lo_path = Some(lo_app.to_string());
+        let ms_paths = [
+            PathBuf::from("/Applications/Microsoft PowerPoint.app"),
+            home_apps.join("Microsoft PowerPoint.app"),
+        ];
+
+        for p in &ms_paths {
+            if p.exists() {
+                has_ms = true;
+                ms_ver = Some("Installed".to_string());
+                break;
+            }
+        }
+
+        let lo_paths = [
+            PathBuf::from("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+            home_apps.join("LibreOffice.app/Contents/MacOS/soffice"),
+            PathBuf::from("/usr/local/bin/soffice"),
+            PathBuf::from("/opt/homebrew/bin/soffice"),
+        ];
+
+        for p in &lo_paths {
+            if p.exists() {
+                has_lo = true;
+                lo_path = Some(p.to_string_lossy().to_string());
+                break;
+            }
+        }
+
+        if !has_lo {
+            if let Ok(output) = Command::new("which").arg("soffice").output() {
+                if output.status.success() {
+                    let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !p.is_empty() && Path::new(&p).exists() {
+                        has_lo = true;
+                        lo_path = Some(p);
+                    }
+                }
+            }
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        // 1. Check standard static paths (system & user flatpak/snap)
         let potential_lo = [
             "/usr/bin/soffice",
             "/usr/local/bin/soffice",
@@ -167,7 +225,6 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
             }
         }
 
-        // 2. Check user-level Flatpak export (~/.local/share/flatpak/exports/bin/org.libreoffice.LibreOffice)
         if !has_lo {
             if let Ok(home) = std::env::var("HOME") {
                 let user_flatpak = Path::new(&home)
@@ -179,7 +236,6 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
             }
         }
 
-        // 3. Check versioned binaries in /usr/bin or /usr/local/bin (e.g. /usr/bin/libreoffice26.8)
         if !has_lo {
             let scan_dirs = ["/usr/bin", "/usr/local/bin"];
             for dir in scan_dirs {
@@ -205,7 +261,6 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
             }
         }
 
-        // 4. Check /opt/libreoffice* installations (e.g. /opt/libreoffice26.8/program/soffice)
         if !has_lo {
             if let Ok(entries) = fs::read_dir("/opt") {
                 for entry in entries.flatten() {
@@ -223,7 +278,6 @@ fn detect_office_suite_internal() -> OfficeSuiteInfo {
             }
         }
 
-        // 5. Fall back to `which` for soffice or libreoffice
         if !has_lo {
             for bin in ["soffice", "libreoffice"] {
                 if let Ok(output) = Command::new("which").arg(bin).output() {
@@ -274,14 +328,14 @@ pub async fn convert_pptx_to_slides(
     let detected = detect_office_suite();
     let selected_engine = engine.unwrap_or(detected.preferred);
 
-    let temp_dir = std::env::temp_dir()
-        .join("recall_slides")
-        .join(uuid_simple());
-
-    fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    // RAII TempDir ensures directory and all intermediate files are cleaned up on success, failure, or panic
+    let temp_dir_handle = TempDir::new().map_err(|e| format!("Failed to create RAII temp dir: {}", e))?;
+    let temp_dir = temp_dir_handle.path();
 
     let abs_pptx = clean_path_str(&fs::canonicalize(&pptx_file).unwrap_or(pptx_file.clone()));
-    let abs_out = clean_path_str(&fs::canonicalize(&temp_dir).unwrap_or(temp_dir.clone()));
+    let abs_out = clean_path_str(&fs::canonicalize(temp_dir).unwrap_or(temp_dir.to_path_buf()));
+
+    let timeout = Duration::from_secs(DEFAULT_OFFICE_TIMEOUT_SECS);
 
     if selected_engine == "ms_office" {
         #[cfg(target_os = "windows")]
@@ -330,9 +384,8 @@ pub async fn convert_pptx_to_slides(
             ps_cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script]);
             ps_cmd.creation_flags(CREATE_NO_WINDOW);
 
-            let res = ps_cmd
-                .output()
-                .map_err(|e| format!("Failed to execute PowerPoint COM export: {}", e))?;
+            let child = ps_cmd.spawn().map_err(|e| format!("Failed to spawn PowerPoint COM process: {}", e))?;
+            let res = run_command_with_timeout(child, timeout)?;
 
             if !res.status.success() {
                 let err = String::from_utf8_lossy(&res.stderr);
@@ -347,7 +400,6 @@ pub async fn convert_pptx_to_slides(
     } else if selected_engine == "libreoffice" {
         let lo_bin = detected.libreoffice_path.unwrap_or_else(|| "soffice".to_string());
 
-        // First attempt: Export directly to HTML / XHTML which extracts all slides as high-res images
         let mut lo_cmd = Command::new(&lo_bin);
         lo_cmd.args([
             "--headless",
@@ -360,11 +412,13 @@ pub async fn convert_pptx_to_slides(
         #[cfg(target_os = "windows")]
         lo_cmd.creation_flags(CREATE_NO_WINDOW);
 
-        let res = lo_cmd.output();
+        let child = lo_cmd.spawn().map_err(|e| format!("Failed to spawn LibreOffice: {}", e))?;
+        let res = run_command_with_timeout(child, timeout);
         let mut has_images = false;
+
         if let Ok(ref output) = res {
             if output.status.success() {
-                if let Ok(entries) = fs::read_dir(&temp_dir) {
+                if let Ok(entries) = fs::read_dir(temp_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
                         if let Some(ext) = path.extension() {
@@ -379,7 +433,6 @@ pub async fn convert_pptx_to_slides(
             }
         }
 
-        // Second attempt fallback: If HTML export didn't yield images, attempt direct PNG export
         if !has_images {
             let mut lo_png_cmd = Command::new(&lo_bin);
             lo_png_cmd.args([
@@ -393,9 +446,8 @@ pub async fn convert_pptx_to_slides(
             #[cfg(target_os = "windows")]
             lo_png_cmd.creation_flags(CREATE_NO_WINDOW);
 
-            let png_res = lo_png_cmd
-                .output()
-                .map_err(|e| format!("Failed to execute LibreOffice: {}", e))?;
+            let child_png = lo_png_cmd.spawn().map_err(|e| format!("Failed to spawn LibreOffice fallback: {}", e))?;
+            let png_res = run_command_with_timeout(child_png, timeout)?;
 
             if !png_res.status.success() {
                 let err = String::from_utf8_lossy(&png_res.stderr);
@@ -408,7 +460,7 @@ pub async fn convert_pptx_to_slides(
 
     // Collect all generated images (.PNG or .JPG) in temp_dir
     let mut slide_files: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(&temp_dir) {
+    if let Ok(entries) = fs::read_dir(temp_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if let Some(ext) = path.extension() {
@@ -420,7 +472,6 @@ pub async fn convert_pptx_to_slides(
         }
     }
 
-    // Sort files by number in filename (e.g. Slide1.PNG, Slide2.PNG ... Slide10.PNG)
     slide_files.sort_by_key(|p| {
         let name = p.file_stem().unwrap_or_default().to_string_lossy();
         extract_number(&name)
@@ -444,6 +495,7 @@ pub async fn convert_pptx_to_slides(
         return Err("No slides were generated from the PowerPoint presentation.".to_string());
     }
 
+    // temp_dir_handle goes out of scope here and automatically deletes the temporary directory and all files
     Ok(result)
 }
 
@@ -452,8 +504,21 @@ fn extract_number(s: &str) -> u32 {
     digits.parse::<u32>().unwrap_or(0)
 }
 
-fn uuid_simple() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    format!("{}_{}", d.as_secs(), d.subsec_nanos())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_number() {
+        assert_eq!(extract_number("Slide1.PNG"), 1);
+        assert_eq!(extract_number("Slide12.PNG"), 12);
+        assert_eq!(extract_number("Presentation_slide_300.jpeg"), 300);
+        assert_eq!(extract_number("noslide"), 0);
+    }
+
+    #[test]
+    fn test_office_suite_detection_does_not_panic() {
+        let info = detect_office_suite();
+        assert!(!info.platform.is_empty());
+    }
 }

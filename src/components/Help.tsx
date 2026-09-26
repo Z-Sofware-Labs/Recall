@@ -52,9 +52,8 @@ const uiOverviewContent = `Welcome to the **Recall** desktop environment. The us
 ## 2. Core Workspaces
 
 * **Dashboard:** Your central home base for managing project files. Here you can inspect active project metadata, quick-save your work, browse existing local files (\`.recall\` or \`.json\`), or start a new project.
-* **Course Editor:** The timeline and structuring studio where you arrange your imported media assets, build interactive curriculum sequences, add custom sections, milestones, and preview your finished course.
-* **Media Organizer:** The asset management hub that integrates local office suites for slide extraction, and lets you import PowerPoint presentations (\`.pptx\`, \`.pt\`), images (\`.png\`, \`.jpg\`, \`.gif\`, \`.webp\`), and video files (\`.mp4\`, \`.av1\`, \`.webm\`).
-* **Quiz Builder:** An assessment design studio offering interactive question categories such as Categorization, Click an Image, Connect the Dots, Enumeration, Essay, Identification, Multiple Choice, Multiple Response, Sequencing, and True/False.
+* **Course Editor:** The all-in-one timeline and structuring studio where you import PowerPoint slides, videos, and images, arrange your curriculum sequences, add custom sections, milestones, and preview your finished course.
+* **Quiz Builder:** An assessment design studio offering 12 interactive question categories such as Categorization, Click an Image, Connect the Dots, Dropdown Select, Enumeration, Essay, Identification, Multiple Choice, Multiple Response, Numeric & Equation, Sequencing, and True/False.
 * **Certificate Builder:** A completion award studio featuring customizable template styles (e.g., Classic Gold & Navy, Prestige Ivy League), dynamic institution branding fields, and live-generated layout previews with export options.
 * **Course Player:** An interactive web learning environment providing seamless lesson delivery, video playback, assessment evaluations, real-time gamified scoring, and completion awards.
 
@@ -79,7 +78,7 @@ const helpData: HelpItem[] = [
 
 Recall is distributed as a lightweight, native offline desktop executable.
 
-1. **Download the Package:** Get the official executable installer for your operating system (\`.exe\` for Windows, \`.dmg\` for macOS, or \`.AppImage\` for Linux).
+1. **Download the Package:** Get the official executable installer for your operating system (\`.exe\` / \`.msi\` for Windows, \`.dmg\` for macOS, or \`.deb\` / \`.rpm\` for Linux).
 2. **Run Installer:** Launch the installer and follow on-screen prompts.
 3. **No Cloud Login Required:** Once installed, Recall runs completely locally with 100% offline data privacy. All project files, quizzes, and learner records stay on your storage device.`
       },
@@ -91,7 +90,7 @@ Recall is distributed as a lightweight, native offline desktop executable.
 Configure your authoring workspace before building your first course:
 
 1. **System Settings:** Click **System Settings** in the sidebar to configure default course templates, instructor information, and appearance themes (Light / Dark mode).
-2. **Dashboard Navigation:** Use the left navigation sidebar to switch between **Dashboard**, **Media Organizer**, **Quiz Builder**, **Course Organizer**, **Certificate Builder**, and **Export Settings**.`
+2. **Dashboard Navigation:** Use the left navigation sidebar to switch between **Dashboard**, **Course Editor**, **Quiz Builder**, **Certificate Builder**, and **Export Settings**.`
       },
     ],
   },
@@ -144,40 +143,50 @@ Structure your lessons by importing media assets and sequencing interactive chec
 * **Mastery Gates:** Add Section Checkpoint Assessments with required passing percentages to ensure learner comprehension before unlocking subsequent modules.`,
     children: [
       {
-        id: 'media-organizer',
-        title: 'Media Organizer',
-        content: `The **Media Organizer** is the central asset management hub in **Recall** where you import, store, and organize all the raw components needed for your interactive courses. 
-
-![Media Organizer Workspace Interface](/help/media-organizer.png)
+        id: 'course-organizer-guide',
+        title: 'Course Organizer',
+        content: `The **Course Organizer** (or Course Editor) is the visual curriculum studio where you arrange media slides, videos, and quizzes into an interactive learning timeline with milestone checkpoints.
 
 ---
 
-## Overview
+## 1. Split Layout & Resizer
 
-When you open the Media Organizer, the app checks for local Office suite integrations to enable high-fidelity slide conversions. The interface provides a centralized workspace with drag-and-drop support for quick importing, alongside category filtering to help you manage your project assets.
-
----
-
-## Import Categories
-
-You can bring three main types of media into your project workspace:
-
-* **Import PowerPoint (.pptx, .ppt):** Extracts slides using local Office suites or fallback conversion engines for exact layout fidelity.
-* **Import Photos (PNG, JPG, JPEG, GIF, WebP):** Adds graphic assets and illustrations directly to your asset library.
-* **Import Video (MP4, AV1, WebM):** Integrates video files to enrich your course materials.
+The Course Organizer features a fluid two-pane layout:
+* **Top Media & Quiz Library:** Browse, filter, and inspect your loaded presentation slides, photos, videos, and authored quizzes. Badges indicate which items are currently used in the timeline.
+* **Bottom Sequence Timeline:** The master filmstrip representing the linear learning path experienced by the student.
+* **Interactive Resizer Bar:** Click and drag the horizontal divider bar up or down to adjust pane heights. Double-click the bar to reset to default heights, or use the quick collapse/expand arrows.
 
 ---
 
-## Asset Management & Filtering
+## 2. Assembling the Timeline
 
-Once your files are uploaded, you can manage them using the built-in view tabs:
+* **Add to Timeline:** Drag media or quiz cards from the library directly onto the bottom timeline, or click the **+ Add to Course** action button on any card.
+* **Batch Drag & Drop:** Multi-select multiple items using checkboxes, then drag the whole batch onto the timeline simultaneously.
+* **Reordering Items:** Drag timeline cards horizontally to reorder them, or use the left/right arrow buttons on each card.
+* **Remove from Timeline:** Click the trash icon on a timeline card to remove it from the active sequence (the original asset remains safe in your library).
 
-* **All (0):** Displays a unified list of every loaded asset in your project.
-* **Slides (0):** Filters your view specifically to presentation slides extracted from PowerPoint files.
-* **Photos (0):** Filters your view to image and graphic assets.
-* **Videos (0):** Filters your view to video files.
+---
 
-> **Tip:** You can drag and drop your files directly into the dashed drop zone or right-click any item for quick management options.`
+## 3. Section Checkpoints & Mastery Gates
+
+Break your course into logical modules or chapters:
+* **Add Section:** Click **+ Add Section** to insert a checkpoint boundary.
+* **Require Passing Score (%):** Set a required percentage (e.g., 75% or 80%) for the section assessment. Downstream modules remain locked until the student meets this passing threshold.
+* **Remedial Review Loop:** If learners fail to meet the section passing criteria, the player gracefully locks advancement and routes them back to review that section's instructional slides.
+
+---
+
+## 4. Final Capstone Assessment & Completion
+
+* **Final Assessment Milestone:** Insert a comprehensive capstone examination at the end of the course timeline. Passing this exam certifies full course completion.
+* **Completion Screen:** Configure graduation awards, summary score tally display, and the **Certificate of Completion** download button.
+
+---
+
+## 5. History & Shortcuts
+
+* **Undo / Redo:** Full multi-level history. Press \`Ctrl+Z\` (\`Cmd+Z\` on macOS) to undo, and \`Ctrl+Y\` or \`Ctrl+Shift+Z\` to redo.
+* **Quick Save:** Press \`Ctrl+S\` (\`Cmd+S\`) to instantly save your project file without leaving the editor canvas.`
       },
       {
         id: 'quiz-builder',
@@ -196,18 +205,20 @@ The Quiz Builder provides a dedicated interactive authoring canvas for various a
 
 ## Supported Question Types
 
-Recall supports a wide array of interactive question types to test different learning outcomes:
+Recall supports 12 interactive question types to test different learning outcomes:
 
 * **Categorization:** Learners sort randomized items or terms into distinct predefined groups, categories, or columns.
 * **Click an Image:** An interactive image hotspot challenge where learners click directly on diagram parts, maps, or anatomy regions.
 * **Connect the Dots:** Interactive matching pairs where learners drag lines or connect related terms between left and right columns.
+* **Dropdown Select:** Inline contextual dropdowns allowing learners to select correct words within sentences or cloze statements.
 * **Enumeration:** Direct term listing allowing learners to input items with case-sensitivity, order tolerance, and synonym keys.
 * **Essay:** Open-ended comprehensive responses evaluated directly with manual teacher scoring.
 * **Identification:** Direct term identification with synonym support, supporting direct entry of answers.
 * **Multiple Choice:** Single best answer selection from randomized options with per-page question navigation.
 * **Multiple Response:** Multi-select checkboxes allowing multiple valid choices with partial credit.
+* **Numeric & Equation:** Evaluates mathematical expressions, fractions, decimals, scientific values, and equivalent formulas with configurable tolerance.
 * **Sequencing:** Chronological or logical re-ordering via full-box drag-and-drop or stepper arrows.
-* **True or False:** Binary assessment option for quick knowledge checks.
+* **True or False:** Binary assessment option with Traditional and Modified (word replacement) modes.
 
 ---
 
@@ -331,6 +342,38 @@ Define the correct associations that learners will need to solve. In learner mod
 
 * Click **+ Add New Pair** to add more items to your activity.
 * For each pair, input the **Left Item (Prompt / Concept)** and its corresponding **Right Item (Matching Definition / Target)**.`
+          },
+          {
+            id: 'quiz-dropdown-select',
+            title: 'Dropdown Select Designer',
+            content: `The **Dropdown Select** designer lets you create interactive cloze and sentence-completion questions where learners choose the correct term from inline dropdown selectors embedded directly within text passages or equations.
+
+---
+
+## General Configuration
+
+* **Assessment Title / Subject:** Set the primary title for the dropdown activity (e.g., *Cell Biology Cloze Test*).
+* **Student Instructions:** Provide clear instructions (e.g., *Select the appropriate term from each dropdown to complete the statements correctly.*).
+* **Layout & Pagination:** Choose between displaying **One Question per Page** or **All on Single Page**.
+* **Randomization Toggles:** Enable **Shuffle Options** to randomize the order of choices inside each dropdown, and **Shuffle Questions Order** to randomize item order for learners.
+
+---
+
+## Scoring & Retries
+
+* **Points per Question:** Assign point values earned for each correctly answered dropdown (total points calculated automatically).
+* **Passing Score:** Set the minimum score threshold required to pass the activity.
+* **Deduction per mistake:** Define penalty deductions subtracted for incorrect selections.
+* **Allowed retries:** Set maximum attempts permitted (or 0 for unlimited).
+
+---
+
+## Constructing Dropdown Questions
+
+* **Prompt Text with Selectors:** Enter sentence prompts where the target blanks are denoted by \`[select]\` placeholders.
+* **Options Pool:** Add 2 to 6 options per question. Mark the correct answer using the check icon or radio button.
+* **Distractors:** Provide believable plausible alternatives (distractors) to accurately gauge learner mastery.
+* **Explanations:** Add an optional explanation note shown to learners upon review.`
           },
           {
             id: 'quiz-enumeration',
@@ -464,6 +507,45 @@ Define the correct expected answers and alternate acceptable terms:
 * Enter your main prompt in the **Question Prompt** box.
 * Check the boxes next to all correct valid choices (e.g., Option A and Option B).
 * Use **Paste Choices** or **+ Add Choice** to manage options dynamically.`
+          },
+          {
+            id: 'quiz-numeric',
+            title: 'Numeric & Equation Designer',
+            content: `The **Numeric & Equation** designer allows authors to construct STEM and mathematical questions supporting exact numeric answers, fractional representations, algebraic formulas, and floating-point tolerances.
+
+---
+
+## 1. Mathematical Features & KaTeX Support
+
+* **Rich Equation Rendering:** Full TeX/LaTeX notation support (e.g. \`\\frac{a}{b}\`, \`x^2 + y^2 = r^2\`, \`\\sqrt{n}\`) rendered in real time.
+* **Fraction & Decimal Equivalence:** Supports fractional answers (e.g. \`3/4\` matches \`0.75\` when configured) and scientific notation.
+* **Acceptable Alternative Formats / Aliases:** Define multiple valid representations of an answer (e.g., \`2x + 1\`, \`1 + 2x\`, \`y = 2x + 1\`).
+
+---
+
+## 2. Configuration & Tolerance
+
+* **Numeric Tolerance (±):** Specify allowable precision error margins (e.g., \`± 0.05\`) for rounded approximations or experimental data.
+* **Layout & Presentation:** Choose between **One Question per Page** or **All on Single Page**.
+* **Shuffle Questions:** Randomize question presentation order to minimize cheating.
+
+---
+
+## 3. Scoring & Retries
+
+* **Points per Question:** Define individual point weights for each question.
+* **Passing Score:** Specify the threshold required to pass the assessment.
+* **Deduction per mistake:** Apply penalties for incorrect numeric entries.
+* **Allowed retries:** Configure max retry attempts.
+
+---
+
+## 4. Question Entry & Step-by-Step Solutions
+
+* **Prompt:** Input the mathematical problem or equation prompt.
+* **Correct Answer:** Define the canonical target answer.
+* **Alternative Answers:** Add alternate equivalent entries to ensure students are graded fairly.
+* **Step-by-Step Explanation:** Provide worked solutions displayed during review mode to facilitate learner understanding.`
           },
           {
             id: 'quiz-sequencing',
@@ -682,7 +764,7 @@ Recall includes **10 Certificate Styles Available**, such as *Classic Gold & Nav
         title: 'End Screen',
         content: `Upon completing final assessment activity, the Recall Course Player displays the End Screen. This interface serves as a comprehensive evaluation summary, displaying the learner's score, pass/fail status, overall readiness, and actionable next steps based on their performance.
 
-![Course Player End Screen Assessment Summary](public/help/course-player-endscreen.png)
+![Course Player End Screen Assessment Summary](/help/course-player-endscreen.png)
 
 ---
 

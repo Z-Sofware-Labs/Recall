@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 #[cfg(target_os = "windows")]
@@ -292,12 +292,13 @@ pub fn register_recall_file_association() -> Result<bool, String> {
                 let _ = std::fs::create_dir_all(&icon_app_dir);
                 let _ = std::fs::copy(icon_src, icon_app_dir.join("recall-doc.png"));
 
+                // Update icon cache if gtk-update-icon-cache exists
                 let _ = Command::new("gtk-update-icon-cache")
-                    .args(["-f", "-t"])
+                    .args(["-f", "-t", "-q"])
                     .arg(home_path.join(".local/share/icons/hicolor"))
                     .output();
 
-                // KDE Plasma sycoca cache update (Plasma 6 / 5)
+                // KDE Plasma sycoca cache update (Plasma 6 / 5) if present
                 let _ = Command::new("kbuildsycoca6").output();
                 let _ = Command::new("kbuildsycoca5").output();
             }
@@ -429,10 +430,17 @@ pub fn unregister_recall_file_association() -> Result<bool, String> {
                     .output();
             }
 
-            // Remove installed custom document icons
-            let mime_icon = home_path.join(".local/share/icons/hicolor/128x128/mimetypes/application-x-recall.png");
-            if mime_icon.exists() {
-                let _ = std::fs::remove_file(&mime_icon);
+            // Remove installed custom document icons across all installed sizes and themes
+            let sizes = ["16x16", "32x32", "48x48", "64x64", "128x128", "256x256"];
+            for size in sizes {
+                let hicolor_icon = home_path.join(format!(".local/share/icons/hicolor/{}/mimetypes/application-x-recall.png", size));
+                if hicolor_icon.exists() {
+                    let _ = std::fs::remove_file(&hicolor_icon);
+                }
+                let breeze_icon = home_path.join(format!(".local/share/icons/breeze/mimetypes/{}/application-x-recall.png", size));
+                if breeze_icon.exists() {
+                    let _ = std::fs::remove_file(&breeze_icon);
+                }
             }
             let app_icon = home_path.join(".local/share/icons/hicolor/128x128/apps/recall-doc.png");
             if app_icon.exists() {
@@ -440,9 +448,11 @@ pub fn unregister_recall_file_association() -> Result<bool, String> {
             }
 
             let _ = Command::new("gtk-update-icon-cache")
-                .args(["-f", "-t"])
+                .args(["-f", "-t", "-q"])
                 .arg(home_path.join(".local/share/icons/hicolor"))
                 .output();
+            let _ = Command::new("kbuildsycoca6").output();
+            let _ = Command::new("kbuildsycoca5").output();
         }
         Ok(true)
     }

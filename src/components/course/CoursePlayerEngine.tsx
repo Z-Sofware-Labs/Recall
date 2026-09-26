@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import {
-  X, ChevronLeft, ChevronRight, Presentation, Image as ImageIcon,
+  X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Presentation, Image as ImageIcon,
   Video, Award, CheckCircle2, AlertTriangle, Trophy,
   ShieldCheck, Check, Crown, RotateCcw, BookOpen,
-  FileText, Edit3, ListChecks, AlertCircle, Printer, Sun, Moon
+  FileText, Edit3, ListChecks, AlertCircle, Printer, Sun, Moon,
+  Play, Sparkles, Layers, Smartphone
 } from 'lucide-react';
 import { TimelineItem, CourseSection, FinalAssessmentMilestone, AssessmentQuestionItem } from '../CourseOrganizer';
 import { QuizActivity } from '../../types/quiz';
@@ -37,6 +38,7 @@ export default function CoursePlayerEngine({
 }: CoursePlayerEngineProps) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [unlockedStepIndex, setUnlockedStepIndex] = useState(0);
+  const [hasStartedActivity, setHasStartedActivity] = useState(false);
   const [sectionResults, setSectionResults] = useState<Record<string, { passed: boolean; score: number; maxScore: number }>>({});
 
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -52,6 +54,41 @@ export default function CoursePlayerEngine({
       return true;
     }
   });
+
+  // Mobile orientation detection & Landscape enforcement prompt
+  const [isPortraitMobile, setIsPortraitMobile] = useState<boolean>(() => {
+    try {
+      const isTouchOrMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth <= 950;
+      return isTouchOrMobile && window.innerHeight > window.innerWidth;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const checkOrientation = () => {
+      try {
+        const isTouchOrMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth <= 950;
+        const isPortrait = window.innerHeight > window.innerWidth;
+        setIsPortraitMobile(isTouchOrMobile && isPortrait);
+      } catch {}
+    };
+
+    window.addEventListener('resize', checkOrientation);
+    window.addEventListener('orientationchange', checkOrientation);
+
+    // Try requesting screen orientation lock if supported in standalone/fullscreen mode
+    try {
+      if ((screen as any).orientation && typeof (screen as any).orientation.lock === 'function') {
+        (screen as any).orientation.lock('landscape').catch(() => {});
+      }
+    } catch {}
+
+    return () => {
+      window.removeEventListener('resize', checkOrientation);
+      window.removeEventListener('orientationchange', checkOrientation);
+    };
+  }, []);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -841,120 +878,295 @@ export default function CoursePlayerEngine({
 
   return (
     <div className={containerClasses}>
-      {/* Top Header matching Preview Mode Screenshot */}
-      <div className={`flex items-center justify-between px-5 sm:px-6 py-3 border-b shrink-0 transition-colors ${
-        isDarkMode ? 'border-slate-800/80 bg-slate-950' : 'border-slate-200 bg-white'
-      }`}>
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs">
-            <Presentation size={20} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded border ${
-                isDarkMode ? 'text-blue-400 bg-blue-950/80 border-blue-800/60' : 'text-blue-700 bg-blue-50 border-blue-200'
-              }`}>
-                {mode === 'preview' ? 'LEARNER PREVIEW MODE' : 'LEARNER MODE'}
-              </span>
-              <span className="text-xs text-slate-500">•</span>
-              <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+      {/* Minimal Top Bar only when started (or when reviewing) to preserve maximum vertical screen estate for phones */}
+      {((hasStartedActivity && onClose) || reviewingSectionTitle) && (
+        <div className={`flex items-center justify-between px-3 sm:px-5 py-1.5 sm:py-2 border-b shrink-0 transition-colors z-30 ${
+          isDarkMode ? 'border-slate-800/80 bg-slate-950' : 'border-slate-200 bg-white'
+        }`}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded border truncate ${
+              isDarkMode ? 'text-blue-400 bg-blue-950/80 border-blue-800/60' : 'text-blue-700 bg-blue-50 border-blue-200'
+            }`}>
+              {mode === 'preview' ? 'PREVIEW' : 'COURSE'}
+            </span>
+            {hasStartedActivity && (
+              <span className={`text-xs font-semibold truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                 Step {currentStepIndex + 1} of {timeline.length}
               </span>
-            </div>
-            <h3 className={`text-sm sm:text-base font-bold truncate max-w-md sm:max-w-xl ${
-              isDarkMode ? 'text-white' : 'text-slate-900'
-            }`}>
-              {courseTitle}
-            </h3>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {reviewingSectionTitle && (
+              <button
+                onClick={handleJumpBackToFinalAssessment}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer animate-pulse"
+              >
+                <Crown size={14} />
+                <span className="hidden sm:inline">Return to Final Assessment</span>
+                <span className="sm:hidden">Final Exam</span>
+              </button>
+            )}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800/80' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+                title="Close Course Player"
+              >
+                <X size={18} />
+              </button>
+            )}
           </div>
         </div>
-
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Light / Dark Mode Switcher */}
-          <button
-            type="button"
-            onClick={() => setIsDarkMode(prev => !prev)}
-            className={`p-2 rounded-xl transition-colors cursor-pointer flex items-center justify-center ${
-              isDarkMode 
-                ? 'text-slate-400 hover:text-white hover:bg-slate-800/80' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-            title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
-          >
-            {isDarkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} className="text-blue-600" />}
-          </button>
-
-          {reviewingSectionTitle && (
-            <button
-              onClick={handleJumpBackToFinalAssessment}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer animate-pulse"
-            >
-              <Crown size={14} />
-              <span>Return to Final Assessment</span>
-            </button>
-          )}
-          {onClose && (
-            <button
-              onClick={onClose}
-              className={`p-2 rounded-xl transition-colors cursor-pointer ${
-                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800/80' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-              title="Close Course Player"
-            >
-              <X size={20} />
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Floating Review Banner */}
       {reviewingSectionTitle && (
-        <div className="bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 text-white px-6 py-2 flex items-center justify-between text-xs font-bold shadow-xs shrink-0">
+        <div className="bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 text-white px-4 sm:px-6 py-2 flex items-center justify-between text-xs font-bold shadow-xs shrink-0">
           <div className="flex items-center gap-2">
             <BookOpen size={16} />
-            <span>Reviewing: {reviewingSectionTitle} (Review slides & retake quiz, then return to Final Assessment)</span>
+            <span className="truncate">Reviewing: {reviewingSectionTitle}</span>
           </div>
           <button
             onClick={handleJumpBackToFinalAssessment}
-            className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-white text-[11px] font-bold cursor-pointer transition-colors"
+            className="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-white text-[11px] font-bold cursor-pointer transition-colors shrink-0"
           >
-            Retake Final Assessment ➔
+            Retake ➔
           </button>
         </div>
       )}
 
-      {/* Progress Timeline Bar */}
-      <div className="w-full bg-slate-900 h-1.5 flex shrink-0 border-b border-slate-800/50">
-        {timeline.map((item, idx) => {
-          const isPassed = idx <= unlockedStepIndex;
-          const isCurrent = idx === currentStepIndex;
-          const isSection = item.kind === 'section';
-          const isFinal = item.kind === 'final_assessment';
-          return (
-            <div
-              key={item.timelineId || idx}
-              style={{ width: `${100 / timeline.length}%` }}
-              className={`h-full border-r border-slate-900 transition-all ${
-                isCurrent
-                  ? 'bg-blue-500 ring-1 ring-blue-400'
-                  : isFinal
-                    ? 'bg-purple-600'
-                    : isSection
-                      ? 'bg-amber-500'
-                      : isPassed
-                        ? 'bg-emerald-500'
-                        : 'bg-slate-800'
+      {/* Dedicated Title / Cover Screen before activity starts */}
+      {!hasStartedActivity ? (
+        <div className={`flex-1 w-full h-full flex flex-col items-center justify-center p-4 sm:p-8 text-center overflow-y-auto custom-scrollbar select-none relative ${
+          isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
+        }`}>
+          {/* Night Mode & Close Floating Bar on Title Screen */}
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsDarkMode(prev => !prev)}
+              className={`p-2.5 rounded-2xl transition-all cursor-pointer border shadow-xs ${
+                isDarkMode 
+                  ? 'bg-slate-900/90 text-amber-400 border-slate-800 hover:bg-slate-800 hover:border-slate-700' 
+                  : 'bg-white text-blue-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
               }`}
-              title={`Step ${idx + 1}: ${item.kind === 'final_assessment' ? item.finalAssessment?.title : item.kind === 'section' ? item.section?.title : item.kind === 'quiz' ? item.quiz?.name : item.media?.name}`}
-            />
-          );
-        })}
-      </div>
+              title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            >
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className={`p-2.5 rounded-2xl transition-all cursor-pointer border shadow-xs ${
+                  isDarkMode 
+                    ? 'bg-slate-900/90 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-white' 
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            )}
+          </div>
 
-      {/* Main Content Stage with Vertical Auto-Scroll (Hidden when fitting) */}
-      <div className={`flex-1 w-full min-h-0 flex flex-col items-center justify-start p-2 sm:p-4 overflow-y-auto overflow-x-hidden custom-scrollbar relative transition-colors ${
-        isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
-      }`}>
+          <div className="max-w-xl w-full mx-auto space-y-3 sm:space-y-5 my-auto animate-in fade-in zoom-in-95 duration-200">
+            {/* Presentation Icon / Badge */}
+            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl sm:rounded-3xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-blue-500/20 ring-2 sm:ring-4 ring-blue-500/10">
+              <Presentation className="w-6 h-6 sm:w-8 sm:h-8" />
+            </div>
+
+            <div className="space-y-1 sm:space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold tracking-wider uppercase border bg-blue-500/10 text-blue-500 border-blue-500/20">
+                <Sparkles size={12} />
+                <span>Interactive Learning Experience</span>
+              </div>
+              <h1 className={`text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight leading-snug sm:leading-tight ${
+                isDarkMode ? 'text-white' : 'text-slate-900'
+              }`}>
+                {courseTitle}
+              </h1>
+              <p className={`text-[11px] sm:text-xs md:text-sm max-w-md mx-auto leading-normal sm:leading-relaxed ${
+                isDarkMode ? 'text-slate-400' : 'text-slate-600'
+              }`}>
+                Work through interactive lessons, quizzes, and checkpoints to test your knowledge and claim your completion certificate.
+              </p>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className={`grid grid-cols-2 gap-2 sm:gap-3 p-2 sm:p-3 rounded-xl sm:rounded-2xl border ${
+              isDarkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white/80 border-slate-200 shadow-xs'
+            }`}>
+              <div className="flex flex-col items-center justify-center p-1.5 rounded-lg sm:rounded-xl bg-blue-500/5">
+                <div className="flex items-center gap-1 text-blue-500 mb-0.5">
+                  <Layers size={14} />
+                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">Curriculum</span>
+                </div>
+                <span className={`text-base sm:text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  {timeline.length} {timeline.length === 1 ? 'Step' : 'Steps'}
+                </span>
+              </div>
+
+              <div className="flex flex-col items-center justify-center p-1.5 rounded-lg sm:rounded-xl bg-purple-500/5">
+                <div className="flex items-center gap-1 text-purple-500 mb-0.5">
+                  <Trophy size={14} />
+                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">Milestone</span>
+                </div>
+                <span className={`text-base sm:text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  Certificate
+                </span>
+              </div>
+            </div>
+
+            {/* Start Button */}
+            <div className="pt-0.5 sm:pt-1">
+              <button
+                type="button"
+                onClick={() => setHasStartedActivity(true)}
+                className="w-full sm:w-auto px-7 py-2.5 sm:py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold rounded-xl sm:rounded-2xl text-xs sm:text-sm md:text-base shadow-lg shadow-blue-500/25 active:scale-95 transition-all cursor-pointer inline-flex items-center justify-center gap-2 group"
+              >
+                <Play size={16} className="fill-current group-hover:translate-x-0.5 transition-transform" />
+                <span>Begin Activity</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+      /* Main Content Area with Vertical Stepper on Left (Visible when hasStartedActivity === true) */
+      <div className="flex-1 w-full min-h-0 flex flex-row overflow-hidden relative">
+        {/* Left Vertical Stepper Controls & Progress Bar */}
+        <div className={`w-14 sm:w-16 shrink-0 border-r flex flex-row items-stretch select-none z-20 transition-colors ${
+          isDarkMode ? 'border-slate-800/80 bg-slate-950/95' : 'border-slate-200 bg-white/95'
+        }`}>
+          {/* Stepper Buttons Column: Back on Top, Step Count & Theme Toggle in Middle, Next on Bottom */}
+          <div className="flex-1 flex flex-col items-center justify-between py-2 sm:py-3 px-1 sm:px-1.5 min-h-0">
+            {/* 1. Back Button (Top) */}
+            <button
+              type="button"
+              onClick={handlePrevStep}
+              disabled={currentStepIndex === 0 || isCourseCompleted}
+              className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold disabled:opacity-30 cursor-pointer transition-all border shadow-xs ${
+                isDarkMode 
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 hover:border-slate-700 active:scale-95' 
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 hover:border-slate-300 active:scale-95'
+              }`}
+              title="Previous Step"
+            >
+              <ChevronUp size={16} />
+              <span className="text-[9px] uppercase tracking-tighter scale-90">Back</span>
+            </button>
+
+            {/* 2. Middle Section: Dark/Light Mode Switcher & Step Indicator */}
+            <div className="flex flex-col items-center justify-center gap-2 py-1 my-auto">
+              {/* Dark/Light Mode Button inside Sidebar */}
+              <button
+                type="button"
+                onClick={() => setIsDarkMode(prev => !prev)}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer border shadow-2xs ${
+                  isDarkMode 
+                    ? 'bg-slate-900/90 text-amber-400 border-slate-800 hover:bg-slate-800 hover:border-slate-700' 
+                    : 'bg-slate-100 text-blue-600 border-slate-200 hover:bg-slate-200 hover:border-slate-300'
+                }`}
+                title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              >
+                {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+
+              {/* Step count indicator */}
+              <div className="flex flex-col items-center justify-center text-center">
+                <span className={`text-[9px] uppercase font-bold tracking-wider ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Step
+                </span>
+                <span className="text-sm sm:text-base font-extrabold text-blue-600 dark:text-blue-400 leading-tight">
+                  {currentStepIndex + 1}
+                </span>
+                <span className="w-3.5 h-px bg-slate-300 dark:bg-slate-700 my-0.5" />
+                <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {timeline.length}
+                </span>
+              </div>
+            </div>
+
+            {/* 3. Next Button (Bottom) */}
+            <button
+              type="button"
+              onClick={handleNextStep}
+              disabled={
+                isCourseCompleted ||
+                isCurrentEssayPending ||
+                isCurrentQuizExhausted ||
+                isTakingSectionAssessment ||
+                isTakingFinalAssessment ||
+                (currentItem.kind === 'quiz' && currentItem.quiz?.type !== 'Essay' && !completedQuizScores[currentItem.quiz.id])
+              }
+              className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold shadow-xs hover:shadow-md transition-all active:scale-95 ${
+                isCourseCompleted ||
+                isCurrentEssayPending ||
+                isCurrentQuizExhausted ||
+                isTakingSectionAssessment ||
+                isTakingFinalAssessment ||
+                (currentItem.kind === 'quiz' && currentItem.quiz?.type !== 'Essay' && !completedQuizScores[currentItem.quiz.id])
+                  ? 'bg-slate-700 cursor-not-allowed opacity-40 text-slate-300'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer ring-1 ring-blue-400/40'
+              }`}
+              title={
+                isCurrentEssayPending 
+                  ? 'Submit Essay to Continue' 
+                  : isCurrentQuizExhausted 
+                    ? 'Section Review Required' 
+                    : (currentItem.kind === 'quiz' && currentItem.quiz?.type !== 'Essay' && !completedQuizScores[currentItem.quiz.id])
+                      ? 'Complete Quiz to Continue'
+                      : (currentItem.kind === 'section' && !sectionResults[currentItem.section.id]?.passed && !isTakingSectionAssessment)
+                        ? 'Start Checkpoint Assessment'
+                        : (currentItem.kind === 'section' && sectionResults[currentItem.section.id]?.passed)
+                          ? 'Continue to Next Module'
+                          : (currentItem.kind === 'final_assessment' && !isTakingFinalAssessment)
+                            ? 'Start Final Capstone Assessment'
+                            : currentStepIndex === safeTimeline.length - 1
+                              ? 'Finish Course & View Certificate'
+                              : 'Next Step'
+              }
+            >
+              <span className="text-[9px] uppercase tracking-tighter scale-90">Next</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+
+          {/* Thin Vertical Progress Line beside buttons */}
+          <div className="w-1.5 bg-slate-200 dark:bg-slate-900 flex flex-col shrink-0 border-l border-slate-300/40 dark:border-slate-800/80">
+            {timeline.map((item, idx) => {
+              const isPassed = idx <= unlockedStepIndex;
+              const isCurrent = idx === currentStepIndex;
+              const isSection = item.kind === 'section';
+              const isFinal = item.kind === 'final_assessment';
+              return (
+                <div
+                  key={item.timelineId || idx}
+                  style={{ height: `${100 / timeline.length}%` }}
+                  className={`w-full border-b border-slate-300/60 dark:border-slate-950 transition-all ${
+                    isCurrent
+                      ? 'bg-blue-500 ring-1 ring-blue-400 z-10'
+                      : isFinal
+                        ? 'bg-purple-600'
+                        : isSection
+                          ? 'bg-amber-500'
+                          : isPassed
+                            ? 'bg-emerald-500'
+                            : 'bg-slate-300 dark:bg-slate-800'
+                  }`}
+                  title={`Step ${idx + 1}: ${item.kind === 'final_assessment' ? item.finalAssessment?.title : item.kind === 'section' ? item.section?.title : item.kind === 'quiz' ? item.quiz?.name : item.media?.name}`}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Main Content Stage with Vertical Auto-Scroll (Hidden when fitting) */}
+        <div className={`flex-1 min-w-0 h-full flex flex-col items-center justify-start p-2 sm:p-4 overflow-y-auto overflow-x-hidden custom-scrollbar relative transition-colors ${
+          isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
+        }`}>
         {/* 1. COURSE COMPLETED / FINAL GRADUATION SCREEN */}
         {isCourseCompleted || currentItem.kind === 'completion_screen' ? (
           <div className={`w-full max-w-xl rounded-3xl border-2 p-5 sm:p-6 shadow-2xl text-center space-y-4 max-h-full overflow-y-auto custom-scrollbar my-auto animate-in zoom-in-95 transition-colors ${
@@ -1623,9 +1835,9 @@ export default function CoursePlayerEngine({
             </div>
           )
         ) : currentItem.media ? (
-          /* 7. MEDIA SLIDE / PHOTO / VIDEO STAGE (MAXIMIZED & AUTO-SCALED) */
-          <div className="w-full h-full flex flex-col items-center justify-center min-h-0 overflow-hidden relative">
-            <div className="w-full h-full flex items-center justify-center p-1 sm:p-2 overflow-hidden">
+          /* 7. MEDIA SLIDE / PHOTO / VIDEO STAGE (MAXIMIZED & FULL-BLEED) */
+          <div className="w-full h-full flex flex-col items-center justify-center min-h-0 overflow-hidden relative select-none">
+            <div className="w-full h-full flex items-center justify-center p-0 sm:p-1 overflow-hidden">
               {currentItem.media.type === 'video' ? (
                 <video
                   key={currentItem.media.id}
@@ -1633,7 +1845,7 @@ export default function CoursePlayerEngine({
                   controls
                   autoPlay
                   playsInline
-                  className="max-h-[calc(100vh-140px)] max-w-full w-auto h-auto object-contain rounded-xl shadow-2xl border border-slate-800"
+                  className="w-full h-full max-h-full max-w-full object-contain rounded-lg sm:rounded-xl shadow-xl"
                   onError={async (e) => {
                     if (currentItem.media?.filePath) {
                       try {
@@ -1646,12 +1858,12 @@ export default function CoursePlayerEngine({
                   }}
                 />
               ) : (
-                <div className="relative w-full h-full flex items-center justify-center">
+                <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
                   <img
                     key={currentItem.media.id}
                     src={currentItem.media.url || (currentItem.media.filePath ? convertFileSrc(currentItem.media.filePath) : '')}
                     alt={currentItem.media.name}
-                    className="max-h-[calc(100vh-140px)] max-w-full w-auto h-auto object-contain rounded-xl shadow-2xl border border-slate-800/80 select-none"
+                    className="w-full h-full max-h-full max-w-full object-contain rounded-lg sm:rounded-xl shadow-xl select-none"
                     onError={async (e) => {
                       if (currentItem.media?.filePath) {
                         try {
@@ -1664,82 +1876,18 @@ export default function CoursePlayerEngine({
                     }}
                   />
                   {/* Subtle Floating Media Pill Label */}
-                  <div className="absolute bottom-2 left-4 px-3 py-1 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-lg text-[11px] font-semibold text-slate-300 flex items-center gap-1.5 shadow-lg">
+                  <div className="absolute bottom-2 left-3 sm:left-4 px-2.5 py-1 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-lg text-[10px] sm:text-[11px] font-semibold text-slate-300 flex items-center gap-1.5 shadow-lg pointer-events-none">
                     {currentItem.media.type === 'slide' && <Presentation size={13} className="text-blue-400" />}
                     {currentItem.media.type === 'photo' && <ImageIcon size={13} className="text-emerald-400" />}
-                    <span>{currentItem.media.name}</span>
                   </div>
                 </div>
               )}
             </div>
           </div>
         ) : null}
-      </div>
-
-      {/* Bottom Navigation Controls */}
-      <div className={`flex items-center justify-between px-5 sm:px-6 py-3.5 border-t shrink-0 transition-colors ${
-        isDarkMode ? 'border-slate-800/80 bg-slate-950' : 'border-slate-200 bg-white'
-      }`}>
-        <button
-          onClick={handlePrevStep}
-          disabled={currentStepIndex === 0 || isCourseCompleted}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-30 cursor-pointer transition-colors border ${
-            isDarkMode 
-              ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800' 
-              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-          }`}
-        >
-          <ChevronLeft size={16} />
-          <span>Previous Step</span>
-        </button>
-
-        <div className="flex items-center gap-2">
-          <span className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-            Step {currentStepIndex + 1} of {timeline.length}
-          </span>
         </div>
-
-        <button
-          onClick={handleNextStep}
-          disabled={
-            isCourseCompleted ||
-            isCurrentEssayPending ||
-            isCurrentQuizExhausted ||
-            isTakingSectionAssessment ||
-            isTakingFinalAssessment ||
-            (currentItem.kind === 'quiz' && currentItem.quiz?.type !== 'Essay' && !completedQuizScores[currentItem.quiz.id])
-          }
-          className={`flex items-center gap-1.5 px-5 py-2 text-white rounded-xl text-xs font-bold shadow-xs hover:shadow-md transition-all ${
-            isCourseCompleted ||
-            isCurrentEssayPending ||
-            isCurrentQuizExhausted ||
-            isTakingSectionAssessment ||
-            isTakingFinalAssessment ||
-            (currentItem.kind === 'quiz' && currentItem.quiz?.type !== 'Essay' && !completedQuizScores[currentItem.quiz.id])
-              ? 'bg-slate-700 cursor-not-allowed opacity-50'
-              : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
-          }`}
-        >
-          <span>
-            {isCurrentEssayPending 
-              ? 'Submit Essay to Continue' 
-              : isCurrentQuizExhausted 
-                ? 'Section Review Required' 
-                : (currentItem.kind === 'quiz' && currentItem.quiz?.type !== 'Essay' && !completedQuizScores[currentItem.quiz.id])
-                  ? 'Complete Quiz to Continue'
-                  : (currentItem.kind === 'section' && !sectionResults[currentItem.section.id]?.passed && !isTakingSectionAssessment)
-                    ? 'Start Checkpoint Assessment ➔'
-                    : (currentItem.kind === 'section' && sectionResults[currentItem.section.id]?.passed)
-                      ? 'Continue to Next Module ➔'
-                      : (currentItem.kind === 'final_assessment' && !isTakingFinalAssessment)
-                        ? 'Start Final Capstone Assessment ➔'
-                        : currentStepIndex === safeTimeline.length - 1
-                          ? 'Finish Course & View Certificate ➔'
-                          : 'Next Step'}
-          </span>
-          <ChevronRight size={16} />
-        </button>
       </div>
+      )}
 
       {/* Student Certificate Viewer Modal */}
       {isCertificateModalOpen && (
@@ -1799,6 +1947,48 @@ export default function CoursePlayerEngine({
               paperFormat={certConfig?.paperFormat || 'a4'}
               isPrintTarget={true}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Force Landscape Orientation Blocker for Android / Mobile devices */}
+      {isPortraitMobile && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-lg flex flex-col items-center justify-center p-6 text-center select-none animate-in fade-in">
+          <div className="max-w-xs w-full flex flex-col items-center space-y-5">
+            {/* Animated Device Rotation Graphic */}
+            <div className="relative w-20 h-20 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-blue-500/20 animate-ping opacity-60"></div>
+              <div className="w-20 h-20 rounded-3xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+                <Smartphone size={38} className="animate-spin-slow transition-transform" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-xl font-extrabold text-white tracking-tight">
+                Please Rotate Your Device
+              </h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                For full-screen presentation slides, diagrams, and quizzes without black borders, please turn your phone horizontally to <strong className="text-blue-400">landscape mode</strong>.
+              </p>
+            </div>
+
+            <div className="pt-2 w-full">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    if ((screen as any).orientation && typeof (screen as any).orientation.lock === 'function') {
+                      await (screen as any).orientation.lock('landscape');
+                    }
+                  } catch {}
+                  // If rotation was successful, the resize/orientationchange listener will close this overlay automatically
+                }}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCcw size={15} />
+                <span>Rotate to Landscape</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

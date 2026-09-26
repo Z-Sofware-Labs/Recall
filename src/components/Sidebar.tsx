@@ -2,7 +2,6 @@ import { navItems } from './navConfig';
 import { Sun, Moon, Info, Lock, X } from 'lucide-react';
 
 const PROJECT_REQUIRED_TABS = new Set([
-  'Media Organizer',
   'Quiz Builder',
   'Certificate Builder',
   'Course Editor',

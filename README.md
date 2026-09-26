@@ -127,7 +127,7 @@ npm run tauri build
 
 The compiled bundles will be generated in `src-tauri/target/release/bundle/`:
 - **Windows**: `.msi` (WiX) and `.exe` (NSIS installer)
-- **Linux**: `.deb` package and standalone `.AppImage`
+- **Linux**: `.deb` and `.rpm` packages
 - **macOS**: `.dmg` and `.app` bundle
 
 ---

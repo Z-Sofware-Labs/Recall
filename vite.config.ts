@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -12,6 +13,11 @@ export default defineConfig(() => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+    },
+    test: {
+      globals: true,
+      environment: 'node',
+      include: ['tests/**/*.{test,spec}.{ts,tsx}'],
     },
     // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
     // 1. prevent vite from obscuring rust errors

@@ -14,7 +14,7 @@ import {
   loadProjectFromPath, 
   saveProject 
 } from '../services/projectService';
-import { MediaItem } from './MediaOrganizer';
+import { MediaItem } from '../types/media';
 import { QuizActivity } from '../types/quiz';
 import { TimelineItem } from './CourseOrganizer';
 import ConfirmDialog from './common/ConfirmDialog';
@@ -254,7 +254,7 @@ export default function Dashboard({
       onStartNewProject();
     }
     if (onNavigateToTab) {
-      onNavigateToTab('Media Organizer');
+      onNavigateToTab('Course Editor');
     }
   };
 
@@ -281,24 +281,26 @@ export default function Dashboard({
   };
 
   return (
-    <div className="space-y-8 w-full">
-      {/* Toast / Status Notification */}
-      {statusMessage && (
-        <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 transition-all animate-in fade-in slide-in-from-top-2 ${
-          statusMessage.type === 'success'
-            ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
-            : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
-        }`}>
-          <div className="flex items-center gap-2 text-sm font-medium">
-            {statusMessage.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
-            <span>{statusMessage.text}</span>
+    <div className="w-full flex flex-col xl:flex-row items-start gap-6">
+      {/* Left/Main Column: Project Workspaces, Actions & Recent History */}
+      <div className="flex-1 min-w-0 space-y-6 w-full">
+        {/* Toast / Status Notification */}
+        {statusMessage && (
+          <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 transition-all animate-in fade-in slide-in-from-top-2 ${
+            statusMessage.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+              : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+          }`}>
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {statusMessage.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+              <span>{statusMessage.text}</span>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Active Project Card (When a project is open) with Right-Aligned Dynamic Action Buttons */}
-      {currentProject && (
-        <section className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 dark:from-blue-950/30 dark:to-indigo-950/30 p-6 rounded-2xl border border-blue-200 dark:border-blue-800/60 shadow-sm space-y-4">
+        {/* Active Project Card (When a project is open) with Right-Aligned Dynamic Action Buttons */}
+        {currentProject && (
+          <section className="bg-linear-to-r from-blue-50/80 to-indigo-50/80 dark:from-blue-950/30 dark:to-indigo-950/30 p-6 rounded-2xl border border-blue-200 dark:border-blue-800/60 shadow-xs space-y-4">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 w-full">
             {/* Project Details (Left) */}
             <div className="space-y-1.5 min-w-0 flex-1">
@@ -584,6 +586,77 @@ export default function Dashboard({
         cancelLabel="Cancel"
         isDestructive={true}
       />
+      </div>
+
+      {/* Right Column: Win98 Web Folders Style Transparent Panel on Main Gradient */}
+      <aside className="w-full xl:w-80 shrink-0 self-stretch flex flex-col">
+        <div className="relative p-6 sm:p-7 flex flex-col justify-between flex-1 select-none">
+          {/* Subtle watermarked app icon in bottom right */}
+          <div className="absolute -bottom-6 -right-6 w-48 h-48 opacity-[0.07] dark:opacity-[0.06] pointer-events-none overflow-hidden select-none">
+            <img src="/app-icon.png" alt="" className="w-full h-full object-contain filter grayscale" draggable={false} />
+          </div>
+
+          <div className="space-y-5 relative z-10">
+            {/* Header: App Icon and Title sitting directly on background */}
+            <div className="flex items-center gap-3.5">
+              <img 
+                src="/app-icon.png" 
+                alt="Recall App Icon" 
+                className="w-14 h-14 object-contain select-none filter drop-shadow-sm"
+                draggable={false}
+              />
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                    Recall
+                  </h2>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-600 text-white rounded uppercase shadow-2xs">
+                    v1.2.0
+                  </span>
+                </div>
+                <p className="text-xs text-blue-700 dark:text-sky-300 font-bold mt-0.5">
+                  Interactive Learning Studio
+                </p>
+              </div>
+            </div>
+
+            {/* Clean classic divider line without box */}
+            <div className="h-px w-full bg-linear-to-r from-blue-400/60 via-slate-300 to-transparent dark:from-sky-500/50 dark:via-slate-700 dark:to-transparent"></div>
+
+            {/* Description & Getting Started Guidance */}
+            <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+              <p>
+                Welcome to <strong className="text-slate-900 dark:text-white font-bold">Recall</strong>. This workspace is your central hub for creating and organizing interactive courses.
+              </p>
+              <p className="text-slate-600 dark:text-slate-400 text-[11.5px]">
+                To get started, choose an action on the left: open an existing course file (<code className="bg-blue-100/70 dark:bg-slate-800/80 px-1 py-0.5 rounded text-blue-800 dark:text-sky-300 font-mono text-[11px]">.recall</code>) or start a new project from scratch.
+              </p>
+            </div>
+
+            {/* Feature Guide */}
+            <div className="pt-2 space-y-2 border-t border-slate-300/70 dark:border-slate-800 text-[11.5px] text-slate-700 dark:text-slate-300">
+              <span className="block font-bold text-slate-900 dark:text-white text-xs mb-1">
+                Quick Capabilities:
+              </span>
+              <ul className="space-y-1.5 list-disc list-inside text-slate-600 dark:text-slate-400 pl-0.5">
+                <li>Import PowerPoint slide decks & videos</li>
+                <li>Sequence lessons on the visual timeline</li>
+                <li>Insert checkpoint quizzes with pass gates</li>
+                <li>Design & issue course completion certificates</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Footer note directly on the gradient */}
+          <div className="pt-4 mt-6 border-t border-slate-300/70 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 relative z-10">
+            <span className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>System Ready</span>
+            </span>
+            <span>100% Offline & Private</span>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }

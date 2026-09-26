@@ -547,19 +547,27 @@ export function parseTrueFalseQuestions(rawText: string): ParsedTFQuestion[] {
       clean = tfStartMatch[2].trim();
     }
 
+    // Detect replacement answer after ->, =>, sagot:, palitan:, replace:
+    const replaceMatch = clean.match(/(?:->|=>|sagot:|palitan:|replacement:|replace:)\s*([^\(\[\r\n]+)/i);
+    if (replaceMatch) {
+      const rawReplacement = replaceMatch[1].trim();
+      const aliasParts = rawReplacement.split(/[\/,;]/).map(a => a.trim()).filter(Boolean);
+      replacementAnswer = aliasParts[0] || '';
+      acceptableAliases = aliasParts.slice(1);
+      clean = clean.substring(0, replaceMatch.index).trim();
+    }
+
     // Detect modified format with underlined or marked word:
-    // e.g. "Ang _Simbahang Katolika_ ang..." or "Ang *pyudalismo* ay..." or "Ang [lupa] ang..."
-    const underlinedMatch = clean.match(/[_*\[]([^_*\[\]]+)[_*\]]/);
-    if (underlinedMatch) {
-      underlinedWord = underlinedMatch[1].trim();
-      // Look for replacement answer after -> or => if marked false
-      const replaceMatch = clean.match(/(?:->|=>|sagot:|palitan:)\s*([^\(\[\r\n]+)/i);
-      if (replaceMatch) {
-        replacementAnswer = replaceMatch[1].trim();
-        const aliasParts = replacementAnswer.split(/[\/,;]/).map(a => a.trim()).filter(Boolean);
-        replacementAnswer = aliasParts[0] || '';
-        acceptableAliases = aliasParts.slice(1);
-      }
+    // e.g. "<u>word</u>", "_word_", "*word*", "[word]"
+    const uTagMatch = clean.match(/<u>(.*?)<\/u>/i);
+    const mdUnderlineMatch = clean.match(/(?:_([^_]+)_|\*([^*]+)\*|\[([^\[\]]+)\])/);
+
+    if (uTagMatch) {
+      underlinedWord = uTagMatch[1].trim();
+      clean = clean.replace(/<\/?u>/gi, '').trim();
+    } else if (mdUnderlineMatch) {
+      underlinedWord = (mdUnderlineMatch[1] || mdUnderlineMatch[2] || mdUnderlineMatch[3] || '').trim();
+      clean = clean.replace(/[_*\[]([^_*\[\]]+)[_*\]]/g, '$1').trim();
     }
 
     results.push({

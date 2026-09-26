@@ -5,7 +5,7 @@ import {
   Award, Layers, Check, ExternalLink, HelpCircle
 } from 'lucide-react';
 import { ProjectData } from '../services/projectService';
-import { MediaItem } from './MediaOrganizer';
+import { MediaItem } from '../types/media';
 import { QuizActivity } from '../types/quiz';
 import { TimelineItem } from './CourseOrganizer';
 import { exportCourseToSingleHtml, exportCourseToWebZip, openExportedFile } from '../services/exportService';
@@ -29,6 +29,7 @@ export default function ExportSettings({
   const [playerTheme, setPlayerTheme] = useState<'dark' | 'light' | 'auto'>('auto');
   const [includeCertificate, setIncludeCertificate] = useState(true);
   const [allowFreeNavigation, setAllowFreeNavigation] = useState(true);
+  const [optimizeMedia, setOptimizeMedia] = useState(true);
   
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<{ success: boolean; filePath: string } | null>(null);
@@ -86,6 +87,7 @@ export default function ExportSettings({
           theme: playerTheme,
           showCertificate: includeCertificate,
           allowFreeNavigation,
+          optimizeMedia,
         });
         if (res) {
           setExportResult(res);
@@ -95,6 +97,7 @@ export default function ExportSettings({
           theme: playerTheme,
           showCertificate: includeCertificate,
           allowFreeNavigation,
+          optimizeMedia,
         });
         if (res) {
           setExportResult(res);
@@ -281,6 +284,24 @@ export default function ExportSettings({
                 type="checkbox"
                 checked={allowFreeNavigation}
                 onChange={(e) => setAllowFreeNavigation(e.target.checked)}
+                className="w-4 h-4 text-blue-600 focus:ring-blue-500 rounded cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div>
+                <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <span>Smart Image Compression</span>
+                  <span className="text-[10px] px-1.5 py-0.5 font-bold uppercase rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    Saves 50–70% Size
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500">Scales oversized 4K photos to 1080p and compresses high-res images to minimize HTML file size.</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={optimizeMedia}
+                onChange={(e) => setOptimizeMedia(e.target.checked)}
                 className="w-4 h-4 text-blue-600 focus:ring-blue-500 rounded cursor-pointer"
               />
             </div>

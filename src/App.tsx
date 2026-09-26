@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Menu, Sun, Moon } from 'lucide-react';
 import Sidebar from './components/Sidebar';
-import MediaOrganizer, { MediaItem } from './components/MediaOrganizer';
 import CourseOrganizer, { TimelineItem } from './components/CourseOrganizer';
 import Dashboard from './components/Dashboard';
 import QuizBuilder from './components/QuizBuilder';
@@ -14,6 +13,7 @@ import UpdateModal from './components/common/UpdateModal';
 import Help from './components/Help';
 import { ProjectData, loadProjectFromPath, saveProject } from './services/projectService';
 import { checkForAppUpdate, UpdateCheckResult } from './services/updateService';
+import { MediaItem } from './types/media';
 import { QuizActivity } from './types/quiz';
 
 const initialSampleMedia: MediaItem[] = [];
@@ -50,6 +50,19 @@ export default function App() {
   const [timeline, setTimeline] = useState<TimelineItem[]>(initialSampleTimeline);
   const [editingQuiz, setEditingQuiz] = useState<QuizActivity | null>(null);
   const [currentProject, setCurrentProject] = useState<ProjectData | null>(null);
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+
+  // Track unsaved changes warning before page/window unload
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
 
   // Update Engine State
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
@@ -88,11 +101,12 @@ export default function App() {
     setQuizActivities([]);
     setTimeline([]);
     setEditingQuiz(null);
+    setActiveTab('Course Editor');
   };
 
   // Guard active tab if project is closed
   useEffect(() => {
-    const projectRequiredTabs = ['Media Organizer', 'Quiz Builder', 'Certificate Builder', 'Course Editor', 'Course Organizer'];
+    const projectRequiredTabs = ['Quiz Builder', 'Certificate Builder', 'Course Editor', 'Course Organizer'];
     if (!currentProject && projectRequiredTabs.includes(activeTab)) {
       setActiveTab('Dashboard');
     }
@@ -185,42 +199,23 @@ export default function App() {
     });
   };
 
-  const handleSaveQuiz = async (savedQuiz: QuizActivity) => {
-    let updatedQuizzes: QuizActivity[] = [];
+  const handleSaveQuiz = (savedQuiz: QuizActivity) => {
     setQuizActivities(prev => {
       const idx = prev.findIndex(q => q.id === savedQuiz.id);
       if (idx >= 0) {
-        updatedQuizzes = [...prev];
-        updatedQuizzes[idx] = savedQuiz;
-      } else {
-        updatedQuizzes = [...prev, savedQuiz];
+        const next = [...prev];
+        next[idx] = savedQuiz;
+        return next;
       }
-      return updatedQuizzes;
+      return [...prev, savedQuiz];
     });
 
+    setIsDirty(true);
     if (currentProject) {
-      const projToSave: ProjectData = {
-        ...currentProject,
-        mediaItems,
-        quizActivities: updatedQuizzes.length > 0 ? updatedQuizzes : [...quizActivities, savedQuiz],
-        timeline,
+      setCurrentProject(prev => prev ? ({
+        ...prev,
         lastModified: Date.now(),
-      };
-
-      try {
-        const result = await saveProject(projToSave, false);
-        if (result && result.success && result.filePath) {
-          setCurrentProject({
-            ...projToSave,
-            filePath: result.filePath
-          });
-          return;
-        }
-      } catch (e) {
-        console.error('Failed to auto-save project:', e);
-      }
-
-      setCurrentProject(projToSave);
+      }) : null);
     }
   };
 
@@ -246,8 +241,6 @@ export default function App() {
             onNavigateToTab={(tab) => setActiveTab(tab)}
           />
         );
-      case 'Media Organizer':
-        return <MediaOrganizer mediaItems={mediaItems} setMediaItems={setMediaItems} />;
       case 'Course Editor':
       case 'Course Organizer':
         return (
@@ -263,7 +256,6 @@ export default function App() {
             courseId={currentProject?.id}
             currentProject={currentProject}
             setCurrentProject={setCurrentProject}
-            onNavigateToMedia={() => setActiveTab('Media Organizer')} 
             onNavigateToExport={() => setActiveTab('Export Settings')}
           />
         );
@@ -314,7 +306,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-white dark:bg-slate-950 transition-colors duration-300 overflow-hidden pb-2.5 sm:pb-3">
+    <div className="flex flex-col md:flex-row h-screen bg-white dark:bg-slate-950 transition-colors duration-300 overflow-hidden">
       {/* Mobile Top Navigation Header */}
       <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 z-30">
         <div className="flex items-center gap-3">
@@ -327,7 +319,12 @@ export default function App() {
             <Menu size={22} />
           </button>
           <div className="flex flex-col">
-            <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight leading-tight">Recall</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight leading-tight">Recall</span>
+              {isDirty && (
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title="Unsaved changes" />
+              )}
+            </div>
             <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{activeTab}</span>
           </div>
         </div>
@@ -357,7 +354,11 @@ export default function App() {
       />
 
       {/* Main View Area */}
-      <main className="flex-1 h-full p-3 sm:p-4 lg:p-6 overflow-y-auto flex flex-col min-w-0">
+      <main className={`flex-1 h-full p-3 sm:p-4 lg:p-6 overflow-y-auto flex flex-col min-w-0 transition-colors duration-300 ${
+        activeTab === 'Dashboard'
+          ? 'bg-linear-to-r from-white via-blue-50/70 to-sky-200/90 dark:from-slate-950 dark:via-slate-900 dark:to-[#0c1a30]'
+          : ''
+      }`}>
         <div className="flex-1 h-full flex flex-col min-h-0">
           {renderContent()}
         </div>

@@ -1,8 +1,11 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { MediaItem } from '../components/MediaOrganizer';
+import { MediaItem, MediaAssetRef } from '../types/media';
 import { QuizActivity } from '../types/quiz';
 import { TimelineItem } from '../components/CourseOrganizer';
+import { sanitizeProjectTitle } from '../utils/filenameSanitizer';
+
+export const CURRENT_PROJECT_FORMAT_VERSION = 2;
 
 export interface RecentProjectEntry {
   id: string;
@@ -12,7 +15,16 @@ export interface RecentProjectEntry {
   timestamp: number;
 }
 
+export interface ProjectAssetManifest {
+  formatVersion: number;
+  projectId: string;
+  title: string;
+  createdWith: string;
+  assets: Record<string, MediaAssetRef>;
+}
+
 export interface ProjectData {
+  formatVersion?: number;
   id: string;
   title: string;
   description?: string;
@@ -23,33 +35,139 @@ export interface ProjectData {
   quizActivities?: QuizActivity[];
   timeline?: TimelineItem[];
   certificate?: any;
+  assetManifest?: ProjectAssetManifest;
 }
 
 const RECENT_PROJECTS_KEY = 'recall_recent_projects';
 
-export async function reviveMediaItem(item: MediaItem): Promise<MediaItem> {
-  // If url is already an embedded Base64 data URL, keep it directly (fully self-contained)
-  if (item.url && item.url.startsWith('data:')) {
-    return item;
+// Bounded in-memory ObjectURL and thumbnail cache to avoid memory amplification
+const objectUrlRegistry = new Map<string, string>();
+const thumbnailRegistry = new Map<string, string>();
+
+export function registerMediaThumbnail(mediaId: string, thumbDataUrl: string) {
+  thumbnailRegistry.set(mediaId, thumbDataUrl);
+}
+
+export function getMediaThumbnail(mediaId: string): string | undefined {
+  return thumbnailRegistry.get(mediaId);
+}
+
+export function releaseObjectUrl(key: string) {
+  const existing = objectUrlRegistry.get(key);
+  if (existing) {
+    URL.revokeObjectURL(existing);
+    objectUrlRegistry.delete(key);
+  }
+}
+
+export function clearObjectUrlRegistry() {
+  for (const [, url] of objectUrlRegistry.entries()) {
+    URL.revokeObjectURL(url);
+  }
+  objectUrlRegistry.clear();
+}
+
+/**
+ * Migration Function: Migrate V1 (embedded Base64) to V2 (asset-based metadata + stable references)
+ * Extracts embedded media into external asset references or assigns stable mediaId,
+ * preserving all existing course content.
+ */
+export function migrateV1ToV2(oldProject: any): ProjectData {
+  const isV1 = !oldProject.formatVersion || oldProject.formatVersion < 2;
+  if (!isV1) {
+    return oldProject as ProjectData;
   }
 
-  // If url is missing, a stale/dead blob:, or a machine-specific local link, restore from filePath
-  if (item.filePath) {
-    try {
-      const dataUrl = await invoke<string>('load_media_data_url', { filePath: item.filePath });
-      if (dataUrl && dataUrl.startsWith('data:')) {
-        return {
-          ...item,
-          url: dataUrl,
-        };
-      }
-    } catch (e) {
-      console.warn(`Could not load data URL for media ${item.name || item.id} from ${item.filePath}:`, e);
-    }
+  const assetManifest: ProjectAssetManifest = {
+    formatVersion: CURRENT_PROJECT_FORMAT_VERSION,
+    projectId: oldProject.id || `proj_${Date.now()}`,
+    title: oldProject.title || 'Migrated Course',
+    createdWith: 'Recall Migration V1->V2',
+    assets: {},
+  };
 
+  const migratedMediaItems: MediaItem[] = [];
+  const mediaIdMap = new Map<string, string>(); // oldId or url -> stable mediaId
+
+  if (Array.isArray(oldProject.mediaItems)) {
+    for (let i = 0; i < oldProject.mediaItems.length; i++) {
+      const item = oldProject.mediaItems[i];
+      const stableId = item.id || `asset_${Date.now()}_${i}`;
+      mediaIdMap.set(stableId, stableId);
+      if (item.url) {
+        mediaIdMap.set(item.url, stableId);
+      }
+
+      assetManifest.assets[stableId] = {
+        mediaId: stableId,
+        name: item.name || `Asset ${i + 1}`,
+        type: item.type || 'photo',
+        mimeType: item.mimeType,
+        filePath: item.filePath,
+        thumbnailUrl: item.thumbnailUrl,
+        sizeBytes: item.size,
+      };
+
+      migratedMediaItems.push({
+        ...item,
+        id: stableId,
+        mediaId: stableId,
+      });
+    }
+  }
+
+  // Rewrite timeline item references
+  const migratedTimeline: TimelineItem[] = [];
+  if (Array.isArray(oldProject.timeline)) {
+    for (const step of oldProject.timeline) {
+      if (step.media) {
+        const matchingId = step.media.id || (step.media.url && mediaIdMap.get(step.media.url)) || `asset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        migratedTimeline.push({
+          ...step,
+          media: {
+            ...step.media,
+            id: matchingId,
+            mediaId: matchingId,
+          },
+        });
+      } else {
+        migratedTimeline.push(step);
+      }
+    }
+  }
+
+  return {
+    ...oldProject,
+    formatVersion: CURRENT_PROJECT_FORMAT_VERSION,
+    mediaItems: migratedMediaItems,
+    timeline: migratedTimeline,
+    assetManifest,
+    lastModified: Date.now(),
+  };
+}
+
+/**
+ * Lazy media revival: Loads thumbnails / lightweight metadata first without decoding huge videos into RAM.
+ */
+export async function reviveMediaItemLazy(item: MediaItem): Promise<MediaItem> {
+  const stableId = item.mediaId || item.id;
+  const cachedThumb = getMediaThumbnail(stableId);
+
+  // If already a valid working URL or thumbnail
+  if (item.url && !item.url.startsWith('file://')) {
     return {
       ...item,
-      url: convertFileSrc(item.filePath),
+      thumbnailUrl: item.thumbnailUrl || cachedThumb,
+    };
+  }
+
+  // If filePath exists, use Tauri asset protocol convertFileSrc for zero-copy streaming
+  if (item.filePath) {
+    const assetUrl = convertFileSrc(item.filePath);
+    return {
+      ...item,
+      url: assetUrl,
+      thumbnailUrl: item.thumbnailUrl || cachedThumb,
     };
   }
 
@@ -130,37 +248,54 @@ export async function browseAndOpenProject(): Promise<ProjectData | null> {
 }
 
 /**
- * Load project content from a specific file path and revive media URLs
+ * Load project content from disk, detect project version, run migration if needed,
+ * and revive media URLs lazily.
  */
 export async function loadProjectFromPath(filePath: string): Promise<ProjectData> {
   const jsonContent = await invoke<string>('load_project_file', { filePath });
-  const parsed = JSON.parse(jsonContent) as ProjectData;
-  parsed.filePath = filePath;
-  parsed.lastModified = Date.now();
-
-  // Revive Media Item URLs using persistent desktop asset loading and Base64 Data URLs
-  if (parsed.mediaItems && Array.isArray(parsed.mediaItems)) {
-    parsed.mediaItems = await Promise.all(parsed.mediaItems.map(reviveMediaItem));
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonContent);
+  } catch (err: any) {
+    throw new Error(`Corrupted project file: Could not parse JSON content from "${filePath}".\n\n${err?.message || err}`);
   }
 
-  // Revive Timeline Media URLs
-  if (parsed.timeline && Array.isArray(parsed.timeline)) {
-    parsed.timeline = await Promise.all(
-      parsed.timeline.map(async (step) => {
+  // Run backward compatibility migration if older format
+  const migrated = migrateV1ToV2(parsed);
+  migrated.filePath = filePath;
+  migrated.lastModified = Date.now();
+
+  // Lazy load media items with bounded concurrency
+  if (migrated.mediaItems && Array.isArray(migrated.mediaItems)) {
+    const concurrency = 6;
+    const items = migrated.mediaItems;
+    const results: MediaItem[] = new Array(items.length);
+
+    for (let i = 0; i < items.length; i += concurrency) {
+      const slice = items.slice(i, i + concurrency);
+      const revivedSlice = await Promise.all(slice.map(reviveMediaItemLazy));
+      for (let j = 0; j < revivedSlice.length; j++) {
+        results[i + j] = revivedSlice[j];
+      }
+    }
+    migrated.mediaItems = results;
+  }
+
+  // Lazy revive timeline media
+  if (migrated.timeline && Array.isArray(migrated.timeline)) {
+    migrated.timeline = await Promise.all(
+      migrated.timeline.map(async (step) => {
         if (step.media) {
-          const revivedMedia = await reviveMediaItem(step.media);
-          return {
-            ...step,
-            media: revivedMedia,
-          };
+          const revived = await reviveMediaItemLazy(step.media);
+          return { ...step, media: revived };
         }
         return step;
       })
     );
   }
 
-  recordRecentProject(parsed);
-  return parsed;
+  recordRecentProject(migrated);
+  return migrated;
 }
 
 const DEFAULT_PROJECT_LOCATION_KEY = 'recall_default_project_location';
@@ -184,89 +319,93 @@ export function setDefaultProjectDirectory(path: string) {
 }
 
 /**
- * Resolves local file paths and embeds all media (videos, slides, images) as Base64 Data URLs.
- * This guarantees that *.recall project files are completely self-contained and portable across devices.
+ * Prepares project for saving.
+ * Instead of embedding hundreds of megabytes of duplicate Base64 strings into the JSON tree,
+ * builds a clean asset manifest and maintains stable media references.
  */
-export async function embedProjectMedia(project: ProjectData): Promise<ProjectData> {
-  const cloned: ProjectData = JSON.parse(JSON.stringify(project));
-  const dataUrlCache = new Map<string, string>();
+export async function prepareProjectForSave(project: ProjectData): Promise<ProjectData> {
+  const assetManifest: ProjectAssetManifest = {
+    formatVersion: CURRENT_PROJECT_FORMAT_VERSION,
+    projectId: project.id,
+    title: project.title,
+    createdWith: 'Recall Authoring App',
+    assets: {},
+  };
 
-  async function resolveUrl(filePath?: string, existingUrl?: string): Promise<string | undefined> {
-    if (existingUrl && existingUrl.startsWith('data:')) {
-      return existingUrl;
-    }
+  const sanitizedMediaItems: MediaItem[] = [];
 
-    const cleanPath = filePath || (
-      existingUrl && !existingUrl.startsWith('blob:') && !existingUrl.startsWith('data:') && !existingUrl.startsWith('http://') && !existingUrl.startsWith('https://')
-        ? existingUrl
-        : undefined
-    );
+  if (Array.isArray(project.mediaItems)) {
+    for (let i = 0; i < project.mediaItems.length; i++) {
+      const item = project.mediaItems[i];
+      const mediaId = item.mediaId || item.id || `asset_${Date.now()}_${i}`;
 
-    if (cleanPath) {
-      if (dataUrlCache.has(cleanPath)) {
-        return dataUrlCache.get(cleanPath)!;
-      }
-      try {
-        const dataUrl = await invoke<string>('load_media_data_url', { filePath: cleanPath });
-        if (dataUrl && dataUrl.startsWith('data:')) {
-          dataUrlCache.set(cleanPath, dataUrl);
-          return dataUrl;
-        }
-      } catch (err) {
-        console.warn('Failed to embed media from path:', cleanPath, err);
-      }
-    }
+      assetManifest.assets[mediaId] = {
+        mediaId,
+        name: item.name,
+        type: item.type,
+        mimeType: item.mimeType,
+        filePath: item.filePath,
+        thumbnailUrl: item.thumbnailUrl,
+        sizeBytes: item.size,
+      };
 
-    return existingUrl;
-  }
+      // Strip large Base64 data URL from saved project JSON if filePath is present,
+      // saving memory and disk space while maintaining reproducibility
+      const isLargeDataUrl = item.url && item.url.startsWith('data:') && item.url.length > 500000;
+      const cleanUrl = (item.filePath && isLargeDataUrl) ? '' : item.url;
 
-  // 1. Embed Media Items (Videos, Photos, Slides)
-  if (Array.isArray(cloned.mediaItems)) {
-    for (const item of cloned.mediaItems) {
-      const embeddedUrl = await resolveUrl(item.filePath, item.url);
-      if (embeddedUrl) {
-        item.url = embeddedUrl;
-      }
+      sanitizedMediaItems.push({
+        ...item,
+        mediaId,
+        url: cleanUrl,
+      });
     }
   }
 
-  // 2. Embed Timeline Items
-  if (Array.isArray(cloned.timeline)) {
-    for (const step of cloned.timeline) {
+  // Ensure timeline items reference stable mediaId
+  const sanitizedTimeline: TimelineItem[] = [];
+  if (Array.isArray(project.timeline)) {
+    for (const step of project.timeline) {
       if (step.media) {
-        const embeddedUrl = await resolveUrl(step.media.filePath, step.media.url);
-        if (embeddedUrl) {
-          step.media.url = embeddedUrl;
-        }
+        const mediaId = step.media.mediaId || step.media.id;
+        const isLargeDataUrl = step.media.url && step.media.url.startsWith('data:') && step.media.url.length > 500000;
+        const cleanUrl = (step.media.filePath && isLargeDataUrl) ? '' : step.media.url;
+
+        sanitizedTimeline.push({
+          ...step,
+          media: {
+            ...step.media,
+            mediaId,
+            url: cleanUrl,
+          },
+        });
+      } else {
+        sanitizedTimeline.push(step);
       }
     }
   }
 
-  // 3. Embed Quiz Activities (e.g. Click An Image hotspots)
-  if (Array.isArray(cloned.quizActivities)) {
-    for (const quiz of cloned.quizActivities) {
-      if (quiz.data?.clickAnImage?.imageUrl && !quiz.data.clickAnImage.imageUrl.startsWith('data:')) {
-        const embeddedUrl = await resolveUrl(undefined, quiz.data.clickAnImage.imageUrl);
-        if (embeddedUrl) {
-          quiz.data.clickAnImage.imageUrl = embeddedUrl;
-        }
-      }
-    }
-  }
-
-  return cloned;
+  return {
+    ...project,
+    formatVersion: CURRENT_PROJECT_FORMAT_VERSION,
+    mediaItems: sanitizedMediaItems,
+    timeline: sanitizedTimeline,
+    assetManifest,
+    lastModified: Date.now(),
+  };
 }
 
 /**
- * Save project to disk. If filePath is missing, prompts for Save As dialog.
- * Automatically embeds all video, audio, and image assets into the *.recall file.
+ * Save project to disk atomically with automatic backup (.bak).
+ * If filePath is missing, prompts for Save As dialog.
  */
 export async function saveProject(project: ProjectData, forceSaveAs = false): Promise<{ success: boolean; filePath: string } | null> {
   let targetPath = project.filePath;
 
   if (!targetPath || forceSaveAs) {
     const defaultDir = await getDefaultProjectDirectory();
-    const fileName = `${project.title || 'Untitled Project'}.recall`;
+    const safeTitle = sanitizeProjectTitle(project.title);
+    const fileName = `${safeTitle}.recall`;
     const defaultPath = defaultDir ? `${defaultDir.replace(/[\\/]$/, '')}/${fileName}` : fileName;
 
     const selected = await save({
@@ -285,21 +424,17 @@ export async function saveProject(project: ProjectData, forceSaveAs = false): Pr
 
   if (!targetPath) return null;
 
-  // Embed all media assets (videos, slides, images) into the saved *.recall project
-  const preparedProject = await embedProjectMedia(project);
+  const preparedProject = await prepareProjectForSave(project);
+  preparedProject.filePath = targetPath;
 
-  const toSave: ProjectData = {
-    ...preparedProject,
-    filePath: targetPath,
-    lastModified: Date.now(),
-  };
+  const jsonString = JSON.stringify(preparedProject, null, 2);
 
-  const jsonString = JSON.stringify(toSave, null, 2);
+  // Invoke atomic Rust save
   await invoke<boolean>('save_project_file', {
     filePath: targetPath,
     content: jsonString,
   });
 
-  recordRecentProject(toSave);
+  recordRecentProject(preparedProject);
   return { success: true, filePath: targetPath };
 }

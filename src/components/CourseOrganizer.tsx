@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Dispatch, SetStateAction, FormEvent, MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, Dispatch, SetStateAction, FormEvent, MouseEvent, DragEvent, ChangeEvent, PointerEvent as ReactPointerEvent } from 'react';
 import {
   Presentation, Image as ImageIcon, Video, Plus, Trash2,
   ChevronLeft, ChevronRight, Eye, Play, Film, X, Layers, Clock,
@@ -6,9 +6,14 @@ import {
   GripVertical, GripHorizontal, CheckSquare, MoveRight, GitCommit, ListOrdered, FileText,
   Type, ListChecks, ArrowDownUp, CheckCircle, ShieldCheck, Share2,
   Lock, Bookmark, Check, Crown, RotateCcw, BookOpen, GraduationCap,
-  Undo2, Redo2, Save, Hash, Search, ChevronUp, ChevronDown, Maximize2
+  Undo2, Redo2, Save, Hash, Search, ChevronUp, ChevronDown, Maximize2,
+  Upload, Loader2, FileUp
 } from 'lucide-react';
-import { MediaItem } from './MediaOrganizer';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
+import { getOfficeSuiteInfo, OfficeSuiteInfo } from '../services/officeService';
+import { MediaItem } from '../types/media';
+import { extractVideoThumbnail } from '../utils/imageUtils';
 import { scoreService, CourseScoreTally } from '../services/scoreService';
 import CourseCompletionModal from './course/CourseCompletionModal';
 import MediaLibraryContextMenu, { ContextMenuState, ContextMenuTarget } from './course/MediaLibraryContextMenu';
@@ -101,7 +106,6 @@ interface CourseOrganizerProps {
   timeline?: TimelineItem[];
   setTimeline?: Dispatch<SetStateAction<TimelineItem[]>>;
   onOpenQuizEditor?: (quiz: QuizActivity) => void;
-  onNavigateToMedia?: () => void;
   onNavigateToExport?: () => void;
   courseTitle?: string;
   courseId?: string;
@@ -117,7 +121,6 @@ export default function CourseOrganizer({
   timeline: timelineProp,
   setTimeline: setTimelineProp,
   onOpenQuizEditor,
-  onNavigateToMedia,
   onNavigateToExport,
   courseTitle = 'Untitled Course',
   courseId = 'course_1',
@@ -262,6 +265,27 @@ export default function CourseOrganizer({
       setTimeline(updatedTimeline);
     }
   }, [quizActivities, timeline, setTimeline]);
+
+  // Cached O(n) lookup maps for library item usage counts across timeline
+  const mediaUsageCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of timeline) {
+      if (item.kind === 'media' && item.media?.id) {
+        map.set(item.media.id, (map.get(item.media.id) || 0) + 1);
+      }
+    }
+    return map;
+  }, [timeline]);
+
+  const quizUsageCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of timeline) {
+      if (item.kind === 'quiz' && item.quiz?.id) {
+        map.set(item.quiz.id, (map.get(item.quiz.id) || 0) + 1);
+      }
+    }
+    return map;
+  }, [timeline]);
 
   // Resizable split state between Media/Quiz Library (top) and Timeline (bottom)
   const [timelineHeight, setTimelineHeight] = useState<number>(() => {
@@ -470,7 +494,18 @@ export default function CourseOrganizer({
 
   const [activeFilter, setActiveFilter] = useState<'all' | 'slide' | 'photo' | 'video' | 'quiz'>('all');
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null);
+
+  // Milestone activity inspector modal state
+  const [inspectingMilestone, setInspectingMilestone] = useState<{
+    timelineId: string;
+    kind: 'section' | 'final_assessment';
+  } | null>(null);
+
+  // Drop highlight on section / final assessment card when quiz is hovered over it
+  const [hoveredMilestoneDropId, setHoveredMilestoneDropId] = useState<string | null>(null);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -499,6 +534,28 @@ export default function CourseOrganizer({
 
   // Multi-selection state for Library items (slides, photos, videos, quizzes)
   const [selectedLibraryItemIds, setSelectedLibraryItemIds] = useState<string[]>([]);
+
+  // Multi-selection state for Filmstrip / Timeline items
+  const [selectedTimelineIds, setSelectedTimelineIds] = useState<string[]>([]);
+
+  // Selection Marquee Box State for Media/Quiz Library
+  const libraryScrollRef = useRef<HTMLDivElement>(null);
+  const [libraryMarquee, setLibraryMarquee] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    isSelecting: boolean;
+  } | null>(null);
+
+  // Selection Marquee Box State for Timeline / Filmstrip
+  const [timelineMarquee, setTimelineMarquee] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    isSelecting: boolean;
+  } | null>(null);
 
   const showToast = (msg: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -581,6 +638,471 @@ export default function CourseOrganizer({
     setSelectedLibraryItemIds([]);
   };
 
+  // ─── Timeline Selection Management ──────────────────────────────────────────
+  const toggleTimelineItemSelection = (timelineId: string, e?: React.MouseEvent | MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedTimelineIds(prev =>
+      prev.includes(timelineId) ? prev.filter(id => id !== timelineId) : [...prev, timelineId]
+    );
+  };
+
+  const handleSelectAllTimeline = () => {
+    if (selectedTimelineIds.length === timeline.length) {
+      setSelectedTimelineIds([]);
+    } else {
+      setSelectedTimelineIds(timeline.map(t => t.timelineId));
+    }
+  };
+
+  const handleClearTimelineSelection = () => {
+    setSelectedTimelineIds([]);
+  };
+
+  const handleDeleteSelectedTimeline = () => {
+    if (selectedTimelineIds.length === 0) return;
+    updateTimeline(prev => prev.filter(t => !selectedTimelineIds.includes(t.timelineId)));
+    showToast(`Removed ${selectedTimelineIds.length} step${selectedTimelineIds.length === 1 ? '' : 's'} from timeline`);
+    setSelectedTimelineIds([]);
+  };
+
+  // ─── Drag Selection Marquee Handlers for Library ────────────────────────────
+  const handleLibraryPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // Only trigger on left-click and if not clicking a card, button, or input
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-library-item-id]') || target.closest('button') || target.closest('input') || target.closest('.no-drag-select')) {
+      return;
+    }
+
+    if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      setSelectedLibraryItemIds([]);
+    }
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    setLibraryMarquee({
+      startX,
+      startY,
+      currentX: startX,
+      currentY: startY,
+      isSelecting: false,
+    });
+  };
+
+  useEffect(() => {
+    if (!libraryMarquee) return;
+
+    // Precalculate card element rects at start of drag marquee to eliminate repeated DOM queries and layout thrashing
+    const cardEntries: Array<{ id: string; rect: DOMRect }> = [];
+    if (libraryScrollRef.current) {
+      const cardElements = Array.from(libraryScrollRef.current.querySelectorAll('[data-library-item-id]')) as HTMLElement[];
+      for (const el of cardElements) {
+        const id = el.getAttribute('data-library-item-id');
+        if (id) {
+          cardEntries.push({ id, rect: el.getBoundingClientRect() });
+        }
+      }
+    }
+
+    let rafId: number | null = null;
+    let latestX = libraryMarquee.startX;
+    let latestY = libraryMarquee.startY;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      latestX = e.clientX;
+      latestY = e.clientY;
+
+      if (rafId !== null) return;
+
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const dist = Math.hypot(latestX - libraryMarquee.startX, latestY - libraryMarquee.startY);
+        const isSelecting = libraryMarquee.isSelecting || dist > 4;
+
+        setLibraryMarquee(prev => prev ? {
+          ...prev,
+          currentX: latestX,
+          currentY: latestY,
+          isSelecting,
+        } : null);
+
+        if (isSelecting && cardEntries.length > 0) {
+          const left = Math.min(libraryMarquee.startX, latestX);
+          const top = Math.min(libraryMarquee.startY, latestY);
+          const right = Math.max(libraryMarquee.startX, latestX);
+          const bottom = Math.max(libraryMarquee.startY, latestY);
+
+          const newlySelected: string[] = [];
+          for (const entry of cardEntries) {
+            const rect = entry.rect;
+            const overlaps = (
+              rect.left < right &&
+              rect.right > left &&
+              rect.top < bottom &&
+              rect.bottom > top
+            );
+            if (overlaps) {
+              newlySelected.push(entry.id);
+            }
+          }
+
+          setSelectedLibraryItemIds(newlySelected);
+        }
+      });
+    };
+
+    const handlePointerUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      setLibraryMarquee(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [libraryMarquee]);
+
+  // ─── Drag Selection Marquee Handlers for Timeline / Filmstrip ───────────────
+  const handleTimelinePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-timeline-step-id]') || target.closest('button') || target.closest('input') || target.closest('.no-drag-select')) {
+      return;
+    }
+
+    if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      setSelectedTimelineIds([]);
+    }
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    setTimelineMarquee({
+      startX,
+      startY,
+      currentX: startX,
+      currentY: startY,
+      isSelecting: false,
+    });
+  };
+
+  useEffect(() => {
+    if (!timelineMarquee) return;
+
+    // Precalculate timeline step rects to eliminate layout thrashing
+    const stepEntries: Array<{ id: string; rect: DOMRect }> = [];
+    if (timelineTrackRef.current) {
+      const cardElements = Array.from(timelineTrackRef.current.querySelectorAll('[data-timeline-step-id]')) as HTMLElement[];
+      for (const el of cardElements) {
+        const id = el.getAttribute('data-timeline-step-id');
+        if (id) {
+          stepEntries.push({ id, rect: el.getBoundingClientRect() });
+        }
+      }
+    }
+
+    let rafId: number | null = null;
+    let latestX = timelineMarquee.startX;
+    let latestY = timelineMarquee.startY;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      latestX = e.clientX;
+      latestY = e.clientY;
+
+      if (rafId !== null) return;
+
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const dist = Math.hypot(latestX - timelineMarquee.startX, latestY - timelineMarquee.startY);
+        const isSelecting = timelineMarquee.isSelecting || dist > 4;
+
+        setTimelineMarquee(prev => prev ? {
+          ...prev,
+          currentX: latestX,
+          currentY: latestY,
+          isSelecting,
+        } : null);
+
+        if (isSelecting && stepEntries.length > 0) {
+          const left = Math.min(timelineMarquee.startX, latestX);
+          const top = Math.min(timelineMarquee.startY, latestY);
+          const right = Math.max(timelineMarquee.startX, latestX);
+          const bottom = Math.max(timelineMarquee.startY, latestY);
+
+          const newlySelected: string[] = [];
+          for (const entry of stepEntries) {
+            const rect = entry.rect;
+            const overlaps = (
+              rect.left < right &&
+              rect.right > left &&
+              rect.top < bottom &&
+              rect.bottom > top
+            );
+            if (overlaps) {
+              newlySelected.push(entry.id);
+            }
+          }
+
+          setSelectedTimelineIds(newlySelected);
+        }
+      });
+    };
+
+    const handlePointerUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      setTimelineMarquee(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [timelineMarquee]);
+
+  // ---------------------------------------------------------------------------
+  // External File Drag and Drop & Import (Slides, Videos, Photos)
+  // ---------------------------------------------------------------------------
+  const [officeInfo, setOfficeInfo] = useState<OfficeSuiteInfo | null>(null);
+  const [isImportingFiles, setIsImportingFiles] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [isFileDraggingOverLibrary, setIsFileDraggingOverLibrary] = useState(false);
+  const [isFileDraggingOverTimeline, setIsFileDraggingOverTimeline] = useState(false);
+  const libraryFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    getOfficeSuiteInfo().then((info) => {
+      if (isMounted) setOfficeInfo(info);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const processExternalFiles = async (
+    files: FileList | File[] | string[],
+    targetDestination: 'library' | 'timeline' = 'library',
+    insertAtIndex?: number
+  ) => {
+    if (!files || (Array.isArray(files) && files.length === 0) || ('length' in files && files.length === 0)) return;
+
+    setIsImportingFiles(true);
+    setImportStatus('Processing dropped files...');
+
+    const newMediaItems: MediaItem[] = [];
+    const engineName = officeInfo?.preferred === 'ms_office'
+      ? 'Microsoft Office'
+      : officeInfo?.preferred === 'libreoffice'
+        ? 'LibreOffice'
+        : 'Office Suite';
+
+    try {
+      const itemsList = Array.from(files as any[]);
+
+      for (let i = 0; i < itemsList.length; i++) {
+        const fileOrPath = itemsList[i];
+        let nativePath: string | undefined;
+        let fileName = '';
+        let fileObj: File | null = null;
+
+        if (typeof fileOrPath === 'string') {
+          nativePath = fileOrPath;
+          fileName = nativePath.split(/[\\/]/).pop() || `File ${i + 1}`;
+        } else if (fileOrPath instanceof File || (fileOrPath && typeof fileOrPath === 'object' && fileOrPath.name)) {
+          fileObj = fileOrPath as File;
+          fileName = fileObj.name;
+          nativePath = (fileObj as any).path || undefined;
+        }
+
+        const lowerName = fileName.toLowerCase();
+        const isPpt = lowerName.endsWith('.pptx') || lowerName.endsWith('.ppt');
+        const isVideo = fileObj?.type?.startsWith('video/') || /\.(mp4|webm|ogg|mov|mkv|avi|av1)$/i.test(lowerName);
+        const isPhoto = fileObj?.type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(lowerName);
+
+        if (isPpt) {
+          if (nativePath) {
+            setImportStatus(`Extracting slides from "${fileName}" (${i + 1}/${itemsList.length}) using ${engineName}...`);
+            try {
+              const baseName = fileName.replace(/\.[^/.]+$/, '');
+              const result = await invoke<Array<{ index: number; name: string; file_path: string; data_url: string }>>(
+                'convert_pptx_to_slides',
+                {
+                  pptxPath: nativePath,
+                  engine: officeInfo?.preferred || null,
+                }
+              );
+
+              const presentationSlides: MediaItem[] = result.map((s) => ({
+                id: `slide_${Date.now()}_${i}_${s.index}_${Math.random().toString(36).substring(2, 6)}`,
+                name: itemsList.length > 1 ? `${baseName} - Slide ${s.index}` : s.name,
+                type: 'slide',
+                url: s.data_url,
+                isSelected: false,
+                filePath: s.file_path,
+              }));
+
+              newMediaItems.push(...presentationSlides);
+            } catch (pptErr: any) {
+              console.error('Failed to convert PPTX:', pptErr);
+              showToast(`Error reading presentation ${fileName}: ${pptErr?.message || pptErr}`);
+            }
+          } else {
+            showToast(`Cannot convert web-dropped PPT without file path: ${fileName}`);
+          }
+        } else if (isVideo || isPhoto) {
+          let url = '';
+          if (nativePath) {
+            try {
+              url = await invoke<string>('load_media_data_url', { filePath: nativePath });
+            } catch {
+              url = convertFileSrc(nativePath);
+            }
+          }
+
+          if (!url && fileObj) {
+            try {
+              url = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(fileObj!);
+              });
+            } catch {
+              url = URL.createObjectURL(fileObj);
+            }
+          }
+
+          let thumbnailUrl: string | undefined = undefined;
+          if (isVideo && (url || fileObj)) {
+            try {
+              const generatedThumb = await extractVideoThumbnail(url || fileObj!);
+              if (generatedThumb) {
+                thumbnailUrl = generatedThumb;
+              }
+            } catch (thumbErr) {
+              console.warn('Could not generate video thumbnail:', thumbErr);
+            }
+          }
+
+          newMediaItems.push({
+            id: `media_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}`,
+            name: fileName,
+            type: isVideo ? 'video' : 'photo',
+            mimeType: fileObj?.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+            url: url || (nativePath ? convertFileSrc(nativePath) : ''),
+            thumbnailUrl,
+            filePath: nativePath,
+            size: fileObj?.size,
+            isSelected: false,
+          });
+        }
+      }
+
+      if (newMediaItems.length > 0) {
+        setMediaItems(prev => [...prev, ...newMediaItems]);
+
+        if (targetDestination === 'timeline') {
+          const newTimelineSteps: TimelineItem[] = newMediaItems.map((m, mIdx) => ({
+            timelineId: `tl_m_${Date.now()}_${mIdx}_${Math.random().toString(36).substring(2, 6)}_${m.id}`,
+            kind: 'media',
+            media: m,
+            durationSeconds: m.type === 'video' ? 60 : 15,
+          }));
+
+          updateTimeline(prev => {
+            const clone = [...prev];
+            const destIdx = insertAtIndex !== undefined && insertAtIndex >= 0 ? insertAtIndex : clone.length;
+            clone.splice(destIdx, 0, ...newTimelineSteps);
+            return clone;
+          });
+
+          showToast(`Imported & inserted ${newMediaItems.length} item${newMediaItems.length === 1 ? '' : 's'} into timeline!`);
+        } else {
+          showToast(`Imported ${newMediaItems.length} media item${newMediaItems.length === 1 ? '' : 's'} into library!`);
+        }
+      } else {
+        showToast('No compatible files found. Drop PowerPoint (.pptx), video (.mp4, .webm, .mov) or image (.png, .jpg) files.');
+      }
+    } catch (err: any) {
+      console.error('Failed to import dropped files:', err);
+      showToast(`Import failed: ${err?.message || err}`);
+    } finally {
+      setIsImportingFiles(false);
+      setImportStatus(null);
+    }
+  };
+
+  const handleLibraryDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsFileDraggingOverLibrary(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processExternalFiles(e.dataTransfer.files, 'library');
+    }
+  };
+
+  const handleTimelineDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsFileDraggingOverTimeline(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      let targetIdx = timeline.length;
+      if (timelineTrackRef.current) {
+        const stepElements = Array.from(timelineTrackRef.current.querySelectorAll('[data-step-index]')) as HTMLElement[];
+        for (let i = 0; i < stepElements.length; i++) {
+          const rect = stepElements[i].getBoundingClientRect();
+          const midX = rect.left + rect.width / 2;
+          if (e.clientX < midX) {
+            targetIdx = i;
+            break;
+          }
+        }
+      }
+      processExternalFiles(e.dataTransfer.files, 'timeline', targetIdx);
+    }
+  };
+
+  const handleManualImportFiles = async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [
+          {
+            name: 'Course Media (PowerPoint, Video, Images)',
+            extensions: ['pptx', 'ppt', 'mp4', 'webm', 'ogg', 'mov', 'mkv', 'avi', 'av1', 'png', 'jpg', 'jpeg', 'webp', 'gif'],
+          },
+        ],
+      });
+
+      if (!selected) return;
+
+      const filePaths: string[] = Array.isArray(selected)
+        ? selected.map(s => typeof s === 'string' ? s : (s as any).path || s)
+        : [typeof selected === 'string' ? selected : (selected as any).path || selected];
+
+      const validPaths = filePaths.filter(Boolean);
+      if (validPaths.length > 0) {
+        processExternalFiles(validPaths, 'library');
+      }
+    } catch (err: any) {
+      console.warn('Native picker fallback to input:', err);
+      libraryFileInputRef.current?.click();
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // Pointer-Based Drag and Drop
   // ---------------------------------------------------------------------------
@@ -588,6 +1110,7 @@ export default function CourseOrganizer({
   const [pointerDropTargetIdx, setPointerDropTargetIdx] = useState<number | null>(null);
   const [isPointerOverTimeline, setIsPointerOverTimeline] = useState(false);
   const timelineTrackRef = useRef<HTMLDivElement | null>(null);
+  const timelineContainerRef = useRef<HTMLDivElement | null>(null);
 
   const startPointerDragMedia = (e: ReactPointerEvent, item: MediaItem) => {
     if (e.button !== 0) return;
@@ -707,18 +1230,40 @@ export default function CourseOrganizer({
 
       setPointerDrag(prev => prev ? { ...prev, clientX: e.clientX, clientY: e.clientY, isStarted } : null);
 
-      if (!timelineTrackRef.current) return;
-      const trackRect = timelineTrackRef.current.getBoundingClientRect();
+      const containerElem = timelineContainerRef.current || timelineTrackRef.current;
+      if (!containerElem) return;
+      const containerRect = containerElem.getBoundingClientRect();
       const isOver = (
-        e.clientX >= trackRect.left &&
-        e.clientX <= trackRect.right &&
-        e.clientY >= trackRect.top - 40 &&
-        e.clientY <= trackRect.bottom + 40
+        e.clientX >= containerRect.left &&
+        e.clientX <= containerRect.right &&
+        e.clientY >= containerRect.top &&
+        e.clientY <= containerRect.bottom
       );
 
       setIsPointerOverTimeline(isOver);
 
+      // Check if dragging quiz / batch with quiz over a section / final assessment milestone card
+      const isDraggingQuiz = pointerDrag.type === 'quiz' || (pointerDrag.type === 'batch' && pointerDrag.batchItems?.some(b => b.type === 'quiz'));
+      if (isDraggingQuiz) {
+        const elemUnderPointer = document.elementFromPoint(e.clientX, e.clientY);
+        const milestoneElem = elemUnderPointer?.closest('[data-milestone-id]') as HTMLElement | null;
+        if (milestoneElem) {
+          const mId = milestoneElem.getAttribute('data-milestone-id');
+          setHoveredMilestoneDropId(mId);
+          setPointerDropTargetIdx(null);
+          return;
+        } else {
+          setHoveredMilestoneDropId(null);
+        }
+      } else {
+        setHoveredMilestoneDropId(null);
+      }
+
       if (isOver) {
+        if (!timelineTrackRef.current) {
+          setPointerDropTargetIdx(timeline.length);
+          return;
+        }
         const stepElements = Array.from(timelineTrackRef.current.querySelectorAll('[data-step-index]')) as HTMLElement[];
         if (stepElements.length === 0) {
           setPointerDropTargetIdx(0);
@@ -741,6 +1286,107 @@ export default function CourseOrganizer({
     };
 
     const handlePointerUp = () => {
+      // Check if dropped directly onto a Section or Final Milestone card
+      if (pointerDrag && pointerDrag.isStarted && hoveredMilestoneDropId) {
+        const quizzesToAdd: QuizActivity[] = [];
+        if (pointerDrag.type === 'quiz' && pointerDrag.quiz) {
+          quizzesToAdd.push(pointerDrag.quiz);
+        } else if (pointerDrag.type === 'batch' && pointerDrag.batchItems) {
+          pointerDrag.batchItems.forEach(b => {
+            if (b.type === 'quiz' && b.quiz) quizzesToAdd.push(b.quiz);
+          });
+        }
+
+        if (quizzesToAdd.length > 0) {
+          let attachedCount = 0;
+          let milestoneName = '';
+
+          updateTimeline(prev => prev.map(item => {
+            if (item.timelineId !== hoveredMilestoneDropId) return item;
+
+            if (item.kind === 'section' && item.section) {
+              milestoneName = item.section.title;
+              const existingQuestions = item.section.assessmentQuestions || [];
+              const newQuestions: AssessmentQuestionItem[] = [];
+
+              quizzesToAdd.forEach(q => {
+                if (!existingQuestions.some(eq => eq.quizId === q.id)) {
+                  newQuestions.push({
+                    quizId: q.id,
+                    quizName: q.name,
+                    quizType: q.type,
+                    points: q.type === 'Essay' ? 0 : (q.totalPoints || 10),
+                    prompt: q.prompt,
+                  });
+                }
+              });
+
+              if (newQuestions.length === 0) return item;
+              attachedCount = newQuestions.length;
+              const allQuestions = [...existingQuestions, ...newQuestions];
+              const questionTypes = Array.from(new Set<string>(allQuestions.map(q => q.quizType)));
+              const totalAssessmentPoints = allQuestions.reduce((sum, q) => sum + q.points, 0);
+
+              return {
+                ...item,
+                section: {
+                  ...item.section,
+                  assessmentQuestions: allQuestions,
+                  questionTypes,
+                  totalAssessmentPoints: totalAssessmentPoints || 30,
+                }
+              };
+            } else if (item.kind === 'final_assessment' && item.finalAssessment) {
+              milestoneName = item.finalAssessment.title;
+              const existingQuestions = item.finalAssessment.assessmentQuestions || [];
+              const newQuestions: AssessmentQuestionItem[] = [];
+
+              quizzesToAdd.forEach(q => {
+                if (!existingQuestions.some(eq => eq.quizId === q.id)) {
+                  newQuestions.push({
+                    quizId: q.id,
+                    quizName: q.name,
+                    quizType: q.type,
+                    points: q.type === 'Essay' ? 0 : (q.totalPoints || 10),
+                    prompt: q.prompt,
+                  });
+                }
+              });
+
+              if (newQuestions.length === 0) return item;
+              attachedCount = newQuestions.length;
+              const allQuestions = [...existingQuestions, ...newQuestions];
+              const questionTypes = Array.from(new Set<string>(allQuestions.map(q => q.quizType)));
+              const totalAssessmentPoints = allQuestions.reduce((sum, q) => sum + q.points, 0);
+
+              return {
+                ...item,
+                finalAssessment: {
+                  ...item.finalAssessment,
+                  assessmentQuestions: allQuestions,
+                  questionTypes,
+                  totalAssessmentPoints: totalAssessmentPoints || 50,
+                }
+              };
+            }
+            return item;
+          }));
+
+          if (attachedCount > 0) {
+            showToast(`Added ${attachedCount} quiz${attachedCount === 1 ? '' : 'zes'} to "${milestoneName}" assessment`);
+          } else {
+            showToast(`Selected quiz activity is already attached to "${milestoneName}"`);
+          }
+
+          if (pointerDrag.type === 'batch') setSelectedLibraryItemIds([]);
+          setPointerDrag(null);
+          setIsPointerOverTimeline(false);
+          setPointerDropTargetIdx(null);
+          setHoveredMilestoneDropId(null);
+          return;
+        }
+      }
+
       if (pointerDrag && pointerDrag.isStarted && isPointerOverTimeline && pointerDropTargetIdx !== null) {
         if (pointerDrag.type === 'timeline' && pointerDrag.timelineIndex !== undefined) {
           const fromIdx = pointerDrag.timelineIndex;
@@ -814,6 +1460,7 @@ export default function CourseOrganizer({
       setPointerDrag(null);
       setIsPointerOverTimeline(false);
       setPointerDropTargetIdx(null);
+      setHoveredMilestoneDropId(null);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -1134,8 +1781,114 @@ export default function CourseOrganizer({
           </h2>
         </div>
 
-        {/* Action Buttons: Save, Preview Course and Export */}
-        <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2.5 sm:gap-3 w-full lg:w-auto lg:ml-auto">
+        {/* Action Buttons: Undo, Redo, Search, Import Media, Save, Preview Course and Export */}
+        <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2 sm:gap-2.5 w-full lg:w-auto lg:ml-auto">
+          {/* Undo & Redo History Controls */}
+          <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-800 pr-2 mr-0.5">
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={!canUndo}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+              title="Undo last timeline change (Ctrl+Z / ⌘Z)"
+            >
+              <Undo2 size={14} className="shrink-0" />
+              <span className="whitespace-nowrap">Undo</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleRedo}
+              disabled={!canRedo}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+              title="Redo undone action (Ctrl+Y / ⌘Shift+Z)"
+            >
+              <Redo2 size={14} className="shrink-0" />
+              <span className="whitespace-nowrap">Redo</span>
+            </button>
+          </div>
+
+          {/* Search Items: Single button with smooth sliding animation */}
+          <div className="relative flex items-center shrink-0">
+            <div
+              className={`flex items-center overflow-hidden transition-all duration-300 ease-in-out h-[36px] rounded-xl border ${
+                isSearchExpanded || librarySearchQuery
+                  ? 'w-48 sm:w-56 bg-white dark:bg-slate-900 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+                  : 'w-[36px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (isSearchExpanded && !librarySearchQuery) {
+                    setIsSearchExpanded(false);
+                  } else {
+                    setIsSearchExpanded(true);
+                    setTimeout(() => searchInputRef.current?.focus(), 50);
+                  }
+                }}
+                className={`w-[36px] h-[36px] flex items-center justify-center shrink-0 cursor-pointer transition-colors ${
+                  isSearchExpanded || librarySearchQuery
+                    ? 'text-blue-600 dark:text-blue-400'
+                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+                }`}
+                title={isSearchExpanded ? 'Collapse search' : 'Search items (slides, photos, videos, quizzes)'}
+              >
+                <Search size={14} className="shrink-0" />
+              </button>
+
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={librarySearchQuery}
+                onChange={(e) => setLibrarySearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    if (librarySearchQuery) {
+                      setLibrarySearchQuery('');
+                    } else {
+                      setIsSearchExpanded(false);
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  if (!librarySearchQuery) {
+                    setIsSearchExpanded(false);
+                  }
+                }}
+                placeholder="Search items..."
+                className={`w-full bg-transparent text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none pr-1.5 transition-opacity duration-200 ${
+                  isSearchExpanded || librarySearchQuery ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                }`}
+              />
+
+              {librarySearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLibrarySearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-sm cursor-pointer shrink-0 mr-1"
+                  title="Clear search"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Import Media Button */}
+          <button
+            type="button"
+            onClick={handleManualImportFiles}
+            disabled={isImportingFiles}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-2xs disabled:opacity-50 shrink-0"
+            title="Import PowerPoint (.pptx), videos or images"
+          >
+            <Upload size={14} className="shrink-0 text-blue-600 dark:text-blue-400" />
+            <span className="whitespace-nowrap">Import Media</span>
+          </button>
+
           {/* 1. Save Course Button */}
           <button
             onClick={() => handleSaveCourse(false)}
@@ -1169,91 +1922,132 @@ export default function CourseOrganizer({
         </div>
       </div>
 
+      {/* Hidden file input fallback for manual media import */}
+      <input
+        ref={libraryFileInputRef}
+        type="file"
+        multiple
+        accept=".pptx,.ppt,image/*,video/*,.mp4,.webm,.ogg,.mov,.mkv,.avi,.av1"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) {
+            processExternalFiles(e.target.files, 'library');
+          }
+          e.target.value = '';
+        }}
+      />
+
       {/* Top Section: Media Library */}
       <div
         onContextMenu={handleBackgroundContextMenu}
-        className="flex-1 border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs flex flex-col overflow-hidden"
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer.types.includes('Files')) {
+            setIsFileDraggingOverLibrary(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setIsFileDraggingOverLibrary(false);
+        }}
+        onDrop={handleLibraryDrop}
+        className={`flex-1 border rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs flex flex-col overflow-hidden relative transition-all ${
+          isFileDraggingOverLibrary
+            ? 'border-blue-500 ring-4 ring-blue-500/20 bg-blue-50/20 dark:bg-blue-950/20'
+            : 'border-slate-200 dark:border-slate-800'
+        }`}
       >
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-lg">
+        {/* Dropping files overlay */}
+        {isFileDraggingOverLibrary && (
+          <div className="absolute inset-0 z-30 bg-blue-600/10 dark:bg-blue-600/20 backdrop-blur-xs flex flex-col items-center justify-center border-2 border-dashed border-blue-500 rounded-2xl pointer-events-none animate-in fade-in duration-150">
+            <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl shadow-xl flex flex-col items-center text-center max-w-sm mx-4 border border-blue-200 dark:border-blue-800">
+              <div className="p-3 bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 rounded-xl mb-2">
+                <FileUp size={32} className="animate-bounce" />
+              </div>
+              <h4 className="font-bold text-slate-900 dark:text-white text-sm">
+                Drop Multiple Slides & Videos Here
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Drop PowerPoint (.pptx), videos (.mp4, .webm) or images to import directly into the Library
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Importing files loading progress bar */}
+        {isImportingFiles && (
+          <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center justify-between text-xs text-blue-800 dark:text-blue-200 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Loader2 size={16} className="animate-spin text-blue-600" />
+              <span className="font-semibold">{importStatus || 'Importing files...'}</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3.5 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+          {/* Left: Library Title & Asset Summary */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-lg shrink-0">
               <Layers size={20} />
             </div>
-            <div>
-              <h3 className="font-semibold text-slate-900 dark:text-white">Media & Quiz Library</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {mediaItems.length} media assets, {quizActivities.length} quizzes • Drag items or click + to add directly into the Sequence Timeline
+            <div className="min-w-0">
+              <h3 className="font-semibold text-slate-900 dark:text-white truncate">Media & Quiz Library</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                {mediaItems.length} media assets, {quizActivities.length} quizzes • Drag & drop multiple files (.pptx, video, image) or click + to add to Sequence Timeline
               </p>
             </div>
           </div>
 
-          {/* Filter Bar & Search Input */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Search Input */}
-            <div className="relative flex items-center">
-              <Search size={13} className="absolute left-2.5 text-slate-400 pointer-events-none" />
-              <input
-                type="text"
-                value={librarySearchQuery}
-                onChange={(e) => setLibrarySearchQuery(e.target.value)}
-                placeholder="Search items..."
-                className="pl-7 pr-6 py-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 w-32 sm:w-40 transition-all"
-              />
-              {librarySearchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setLibrarySearchQuery('')}
-                  className="absolute right-1.5 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded cursor-pointer"
-                  title="Clear search"
-                >
-                  <X size={11} />
-                </button>
-              )}
-            </div>
-
-            {/* Type Filter Tabs */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+          {/* Right: Controls Group (Filter Pills, Search, Import Media) Aligned to Far Right */}
+          <div className="flex flex-wrap items-center justify-end gap-2 w-full xl:w-auto shrink-0 xl:ml-auto">
+            {/* Type Filter Pills */}
+            <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shrink-0">
               <button
+                type="button"
                 onClick={() => setActiveFilter('all')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${activeFilter === 'all'
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${activeFilter === 'all'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
               >
                 All ({totalAssetsCount})
               </button>
               <button
+                type="button"
                 onClick={() => setActiveFilter('slide')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'slide'
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'slide'
                     ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
               >
                 <Presentation size={12} /> Slides ({slideCount})
               </button>
               <button
+                type="button"
                 onClick={() => setActiveFilter('photo')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'photo'
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'photo'
                     ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
               >
                 <ImageIcon size={12} /> Photos ({photoCount})
               </button>
               <button
+                type="button"
                 onClick={() => setActiveFilter('video')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'video'
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'video'
                     ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
               >
                 <Video size={12} /> Videos ({videoCount})
               </button>
               <button
+                type="button"
                 onClick={() => setActiveFilter('quiz')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'quiz'
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 ${activeFilter === 'quiz'
                     ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
               >
                 <Tags size={12} /> Quizzes ({quizCount})
@@ -1263,7 +2057,11 @@ export default function CourseOrganizer({
         </div>
 
         {/* Library Items Scroll Area */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          ref={libraryScrollRef}
+          onPointerDown={handleLibraryPointerDown}
+          className="flex-1 overflow-y-auto relative select-none"
+        >
           {/* Batch Selection Action Toolbar */}
           {selectedLibraryItemIds.length > 0 && (
             <div className="mb-3 p-2.5 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl flex flex-wrap items-center justify-between gap-2.5 animate-in fade-in">
@@ -1307,24 +2105,27 @@ export default function CourseOrganizer({
           )}
 
           {totalAssetsCount === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8">
-              <div className="p-4 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-2xl mb-3">
-                <Layers size={32} />
+            <div className="h-full flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl m-2">
+              <div className="p-4 bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 rounded-2xl mb-3">
+                <FileUp size={36} />
               </div>
-              <p className="font-semibold text-slate-700 dark:text-slate-300 text-sm">
-                No items available in the course library.
+              <p className="font-semibold text-slate-800 dark:text-slate-200 text-sm">
+                Drag & Drop Slides, Videos or Images Here
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4">
-                Import slides or create quizzes in Quiz Builder to start designing your course.
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4 max-w-sm">
+                Drop multiple PowerPoint presentations (.pptx), videos (.mp4), or images directly from your computer, or click below.
               </p>
-              {onNavigateToMedia && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={onNavigateToMedia}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                  type="button"
+                  onClick={handleManualImportFiles}
+                  disabled={isImportingFiles}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
                 >
-                  Go to Media Organizer
+                  <Upload size={14} />
+                  <span>Choose Files</span>
                 </button>
-              )}
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(175px,1fr))] gap-2.5 sm:gap-3 p-1">
@@ -1340,11 +2141,12 @@ export default function CourseOrganizer({
                       contextMenu.target.item.id === item.id;
                     const isBeingDragged = pointerDrag?.isStarted && pointerDrag?.media?.id === item.id;
                     const isSelected = selectedLibraryItemIds.includes(item.id);
-                    const usageCount = timeline.filter(t => t.kind === 'media' && t.media?.id === item.id).length;
+                    const usageCount = mediaUsageCountMap.get(item.id) || 0;
 
                     return (
                       <div
                         key={item.id}
+                        data-library-item-id={item.id}
                         onPointerDown={(e) => startPointerDragMedia(e, item)}
                         onContextMenu={(e) => handleItemContextMenu(e, item)}
                         className={`group relative flex flex-col border rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-950/50 hover:border-blue-500 dark:hover:border-blue-500 transition-all shadow-xs cursor-grab active:cursor-grabbing touch-none ${isBeingDragged
@@ -1360,19 +2162,19 @@ export default function CourseOrganizer({
                         <div className="relative aspect-video bg-slate-900 overflow-hidden flex items-center justify-center">
                           {item.type === 'video' ? (
                             <div className="relative w-full h-full flex items-center justify-center bg-slate-900 pointer-events-none">
-                              <video 
-                                src={item.url} 
-                                className="w-full h-full object-cover opacity-75" 
-                                preload="metadata" 
-                                muted 
-                                playsInline 
-                              />
+                              {item.thumbnailUrl ? (
+                                <img src={item.thumbnailUrl} alt={item.name} className="w-full h-full object-cover opacity-85 select-none" draggable={false} />
+                              ) : (
+                                <div className="w-full h-full bg-slate-900 flex items-center justify-center text-slate-500">
+                                  <Video size={24} />
+                                </div>
+                              )}
                               <div className="absolute p-1.5 bg-purple-600/85 text-white rounded-full shadow-md flex items-center justify-center">
                                 <Film size={13} />
                               </div>
                             </div>
                           ) : (
-                            <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                            <img src={item.thumbnailUrl || item.url} alt={item.name} className="w-full h-full object-cover pointer-events-none select-none" draggable={false} />
                           )}
 
                           {/* Type Badge */}
@@ -1454,11 +2256,12 @@ export default function CourseOrganizer({
                     contextMenu.target.quiz.id === quiz.id;
                   const isBeingDragged = pointerDrag?.isStarted && pointerDrag?.quiz?.id === quiz.id;
                   const isSelected = selectedLibraryItemIds.includes(quiz.id);
-                  const usageCount = timeline.filter(t => t.kind === 'quiz' && t.quiz?.id === quiz.id).length;
+                  const usageCount = quizUsageCountMap.get(quiz.id) || 0;
 
                   return (
                     <div
                       key={quiz.id}
+                      data-library-item-id={quiz.id}
                       onPointerDown={(e) => startPointerDragQuiz(e, quiz)}
                       onContextMenu={(e) => handleQuizContextMenu(e, quiz)}
                       onDoubleClick={() => onOpenQuizEditor?.(quiz)}
@@ -1558,6 +2361,19 @@ export default function CourseOrganizer({
                 })}
             </div>
           )}
+
+          {/* Drag Selection Marquee Box (Library) */}
+          {libraryMarquee && libraryMarquee.isSelecting && (
+            <div
+              className="fixed pointer-events-none z-50 border border-blue-500 bg-blue-500/20 backdrop-blur-[0.5px] rounded"
+              style={{
+                left: Math.min(libraryMarquee.startX, libraryMarquee.currentX),
+                top: Math.min(libraryMarquee.startY, libraryMarquee.currentY),
+                width: Math.abs(libraryMarquee.currentX - libraryMarquee.startX),
+                height: Math.abs(libraryMarquee.currentY - libraryMarquee.startY),
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -1633,14 +2449,47 @@ export default function CourseOrganizer({
 
       {/* Bottom Section: Course Timeline */}
       <div
+        ref={timelineContainerRef}
         style={{ height: `${timelineHeight}px` }}
-        className={`shrink-0 border rounded-2xl bg-slate-50 dark:bg-slate-950 p-3 shadow-xs flex flex-col overflow-hidden ${
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer.types.includes('Files')) {
+            setIsFileDraggingOverTimeline(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setIsFileDraggingOverTimeline(false);
+        }}
+        onDrop={handleTimelineDrop}
+        className={`shrink-0 border rounded-2xl bg-slate-50 dark:bg-slate-950 p-3 shadow-xs flex flex-col overflow-hidden relative ${
           isResizingSplit ? '' : 'transition-all'
-        } ${isPointerOverTimeline
-            ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-50/20 dark:bg-blue-950/20'
-            : 'border-slate-200 dark:border-slate-800'
-          }`}
+        } ${
+          isFileDraggingOverTimeline
+            ? 'border-indigo-500 ring-4 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20'
+            : isPointerOverTimeline
+              ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-50/20 dark:bg-blue-950/20'
+              : 'border-slate-200 dark:border-slate-800'
+        }`}
       >
+        {/* Dropping files directly on timeline overlay */}
+        {isFileDraggingOverTimeline && (
+          <div className="absolute inset-0 z-30 bg-indigo-600/10 dark:bg-indigo-600/25 backdrop-blur-xs flex flex-col items-center justify-center border-2 border-dashed border-indigo-500 rounded-2xl pointer-events-none animate-in fade-in duration-150">
+            <div className="p-3 bg-white dark:bg-slate-900 rounded-xl shadow-xl flex items-center gap-3 border border-indigo-200 dark:border-indigo-800">
+              <div className="p-2 bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                <FileUp size={24} className="animate-bounce" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 dark:text-white text-xs">
+                  Drop Files Directly Into Timeline
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  New steps will be added to the sequence automatically
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-1.5 shrink-0">
           <div className="flex items-center gap-2">
             <Clock className="text-blue-600 dark:text-blue-400" size={17} />
@@ -1653,29 +2502,35 @@ export default function CourseOrganizer({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Undo / Redo Controls */}
-            <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-800 pr-2 mr-1">
-              <button
-                type="button"
-                onClick={handleUndo}
-                disabled={!canUndo}
-                className="flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold cursor-pointer transition-colors shadow-2xs"
-                title="Undo last timeline change (Ctrl+Z / ⌘Z)"
-              >
-                <Undo2 size={13} />
-                <span>Undo</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleRedo}
-                disabled={!canRedo}
-                className="flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold cursor-pointer transition-colors shadow-2xs"
-                title="Redo undone action (Ctrl+Y / ⌘Shift+Z)"
-              >
-                <Redo2 size={13} />
-                <span>Redo</span>
-              </button>
-            </div>
+            {selectedTimelineIds.length > 0 && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-100 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-lg text-xs font-semibold mr-1 animate-in fade-in">
+                <span className="text-blue-700 dark:text-blue-300 font-bold text-[11px]">
+                  {selectedTimelineIds.length} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSelectAllTimeline}
+                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline px-1 cursor-pointer"
+                >
+                  {selectedTimelineIds.length === timeline.length ? 'Deselect All' : 'Select All'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearTimelineSelection}
+                  className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 px-1 cursor-pointer"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelectedTimeline}
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold cursor-pointer transition-colors ml-0.5"
+                  title="Delete selected steps"
+                >
+                  <Trash2 size={11} /> Delete
+                </button>
+              </div>
+            )}
 
             <button
               onClick={() => handleOpenAddSectionModal(false)}
@@ -1717,6 +2572,7 @@ export default function CourseOrganizer({
         {/* Horizontal Timeline Track */}
         <div
           ref={timelineTrackRef}
+          onPointerDown={handleTimelinePointerDown}
           onWheel={(e) => {
             if (timelineTrackRef.current && e.deltaY !== 0) {
               timelineTrackRef.current.scrollLeft += e.deltaY;
@@ -1727,7 +2583,7 @@ export default function CourseOrganizer({
             e.preventDefault();
             setFilmstripCtxMenu({ isOpen: true, x: e.clientX, y: e.clientY, timelineId: '', idx: -1, kind: 'track', title: '' });
           }}
-          className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex gap-3 items-center pt-1 pb-3.5 px-2 rounded-xl select-none"
+          className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex gap-3 items-center pt-1 pb-3.5 px-2 rounded-xl select-none relative"
         >
           {timeline.length === 0 ? (
             <div
@@ -1749,9 +2605,10 @@ export default function CourseOrganizer({
                 const media = item.media;
                 const isBeingDragged = pointerDrag?.isStarted && pointerDrag?.timelineIndex === idx;
                 const isDropTargetHere = isPointerOverTimeline && pointerDropTargetIdx === idx;
+                const isSelectedInTimeline = selectedTimelineIds.includes(item.timelineId);
 
                 return (
-                  <div key={item.timelineId} data-step-index={idx} className="flex items-center gap-3 shrink-0 h-full">
+                  <div key={item.timelineId} data-step-index={idx} data-timeline-step-id={item.timelineId} className="flex items-center gap-3 shrink-0 h-full">
                     {/* Visual Insertion Indicator before this card */}
                     {isDropTargetHere && (
                       <div className="w-2.5 h-[180px] bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full shadow-lg shadow-blue-500/50 animate-pulse shrink-0" />
@@ -1760,18 +2617,55 @@ export default function CourseOrganizer({
                     {/* FINAL COURSE MILESTONE CARD */}
                     {item.kind === 'final_assessment' && item.finalAssessment ? (
                       <div
+                        data-milestone-id={item.timelineId}
+                        data-timeline-step-id={item.timelineId}
                         onPointerDown={(e) => startPointerDragTimelineStep(e, idx, item)}
+                        onDoubleClick={() => setInspectingMilestone({ timelineId: item.timelineId, kind: 'final_assessment' })}
                         onContextMenu={(e) => handleFilmstripContextMenu(e as unknown as MouseEvent, { timelineId: item.timelineId, idx, kind: 'final_assessment', title: item.finalAssessment.title })}
-                        className={`group relative flex-shrink-0 w-48 h-[180px] bg-gradient-to-b from-purple-900/30 via-indigo-950/20 to-slate-950 border-2 border-purple-500 rounded-xl overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing transition-all select-none touch-none shadow-lg ring-2 ring-purple-500/20 ${isBeingDragged ? 'opacity-30 scale-95 border-dashed' : ''
-                          }`}
+                        className={`group relative flex-shrink-0 w-48 h-[180px] bg-gradient-to-b from-purple-900/30 via-indigo-950/20 to-slate-950 border-2 rounded-xl overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing transition-all select-none touch-none shadow-lg ${
+                          isSelectedInTimeline
+                            ? 'border-blue-400 ring-4 ring-blue-500/60 shadow-xl'
+                            : hoveredMilestoneDropId === item.timelineId
+                              ? 'border-purple-300 ring-4 ring-purple-400/60 scale-102 bg-purple-900/50'
+                              : 'border-purple-500 ring-2 ring-purple-500/20'
+                        } ${isBeingDragged ? 'opacity-30 scale-95 border-dashed' : ''}`}
+                        title="Double-click to view & manage assessment questions, or drop quizzes directly onto this card"
                       >
+                        {/* Drop Target Overlay Highlight */}
+                        {hoveredMilestoneDropId === item.timelineId && (
+                          <div className="absolute inset-0 z-30 bg-purple-600/30 backdrop-blur-xs flex flex-col items-center justify-center pointer-events-none p-2 text-center animate-in fade-in">
+                            <Plus size={24} className="text-purple-200 animate-bounce" />
+                            <span className="text-[11px] font-black text-white drop-shadow-md">Drop Quiz to Attach</span>
+                          </div>
+                        )}
+
                         {/* Final Header */}
                         <div className="px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white flex items-center justify-between text-[10px] font-black shrink-0">
                           <div className="flex items-center gap-1.5 truncate">
+                            <div
+                              onClick={(e) => toggleTimelineItemSelection(item.timelineId, e)}
+                              className="cursor-pointer p-0.5 shrink-0"
+                              title={isSelectedInTimeline ? 'Deselect milestone' : 'Select milestone'}
+                            >
+                              <div className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all ${
+                                isSelectedInTimeline
+                                  ? 'bg-blue-600 border-white text-white'
+                                  : 'bg-black/30 border-purple-300 text-transparent hover:border-white'
+                              }`}>
+                                <Check size={9} strokeWidth={3} />
+                              </div>
+                            </div>
                             <Crown size={14} className="shrink-0 text-amber-300" />
                             <span className="truncate">Final Milestone</span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setInspectingMilestone({ timelineId: item.timelineId, kind: 'final_assessment' }); }}
+                              className="p-0.5 text-purple-200 hover:text-white cursor-pointer"
+                              title="View & manage activities"
+                            >
+                              <ListChecks size={12} />
+                            </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleMilestoneRenameStart(item.timelineId, item.finalAssessment.title); }}
                               className="p-0.5 text-purple-200 hover:text-white cursor-pointer"
@@ -1824,9 +2718,8 @@ export default function CourseOrganizer({
                             />
                           ) : (
                             <h4
-                              className="text-xs font-bold text-white line-clamp-1 cursor-text"
-                              title="Double-click to rename"
-                              onDoubleClick={(e) => { e.stopPropagation(); handleMilestoneRenameStart(item.timelineId, item.finalAssessment.title); }}
+                              className="text-xs font-bold text-white line-clamp-1 cursor-pointer hover:text-purple-200 transition-colors"
+                              title="Click to view activities, or double-click header to edit"
                             >
                               {item.finalAssessment.title}
                             </h4>
@@ -1849,8 +2742,9 @@ export default function CourseOrganizer({
                           ) : null}
 
                           <p className="text-[9px] text-purple-300 truncate" title={item.finalAssessment.assessmentQuizTitle}>
-                            {item.finalAssessment.questionTypes?.length ? `${item.finalAssessment.questionTypes.length} Types • ${item.finalAssessment.totalAssessmentPoints || 50} pts` : (item.finalAssessment.assessmentQuizTitle || 'Multi-Type Exam')}
+                            {item.finalAssessment.assessmentQuestions?.length ? `${item.finalAssessment.assessmentQuestions.length} Questions • ${item.finalAssessment.totalAssessmentPoints || 50} pts` : (item.finalAssessment.assessmentQuizTitle || 'Multi-Type Exam')}
                           </p>
+                          <span className="text-[8px] text-purple-400 block opacity-80">2x click to reveal activities</span>
                         </div>
 
                         {/* Final Footer */}
@@ -1861,18 +2755,55 @@ export default function CourseOrganizer({
                       </div>
                     ) : isSection && item.section ? (
                       <div
+                        data-milestone-id={item.timelineId}
+                        data-timeline-step-id={item.timelineId}
                         onPointerDown={(e) => startPointerDragTimelineStep(e, idx, item)}
+                        onDoubleClick={() => setInspectingMilestone({ timelineId: item.timelineId, kind: 'section' })}
                         onContextMenu={(e) => handleFilmstripContextMenu(e as unknown as MouseEvent, { timelineId: item.timelineId, idx, kind: 'section', title: item.section.title })}
-                        className={`group relative flex-shrink-0 w-48 h-[180px] bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-slate-900 border-2 border-amber-400 dark:border-amber-600 rounded-xl overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing transition-all select-none touch-none shadow-md ${isBeingDragged ? 'opacity-30 scale-95 border-dashed' : ''
-                          }`}
+                        className={`group relative flex-shrink-0 w-48 h-[180px] bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-slate-900 border-2 rounded-xl overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing transition-all select-none touch-none shadow-md ${
+                          isSelectedInTimeline
+                            ? 'border-blue-400 ring-4 ring-blue-500/60 shadow-xl'
+                            : hoveredMilestoneDropId === item.timelineId
+                              ? 'border-amber-300 ring-4 ring-amber-400/60 scale-102 bg-amber-500/20'
+                              : 'border-amber-400 dark:border-amber-600'
+                        } ${isBeingDragged ? 'opacity-30 scale-95 border-dashed' : ''}`}
+                        title="Double-click to view & manage assessment questions, or drop quizzes directly onto this card"
                       >
+                        {/* Drop Target Overlay Highlight */}
+                        {hoveredMilestoneDropId === item.timelineId && (
+                          <div className="absolute inset-0 z-30 bg-amber-500/25 backdrop-blur-xs flex flex-col items-center justify-center pointer-events-none p-2 text-center animate-in fade-in">
+                            <Plus size={24} className="text-amber-200 animate-bounce" />
+                            <span className="text-[11px] font-black text-amber-100 drop-shadow-md">Drop Quiz to Attach</span>
+                          </div>
+                        )}
+
                         {/* Section Header */}
                         <div className="px-2.5 py-1 bg-amber-500 text-slate-950 flex items-center justify-between text-[10px] font-extrabold shrink-0">
                           <div className="flex items-center gap-1.5 truncate">
+                            <div
+                              onClick={(e) => toggleTimelineItemSelection(item.timelineId, e)}
+                              className="cursor-pointer p-0.5 shrink-0"
+                              title={isSelectedInTimeline ? 'Deselect checkpoint' : 'Select checkpoint'}
+                            >
+                              <div className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all ${
+                                isSelectedInTimeline
+                                  ? 'bg-blue-600 border-white text-white'
+                                  : 'bg-black/20 border-amber-900/60 text-transparent hover:border-black'
+                              }`}>
+                                <Check size={9} strokeWidth={3} />
+                              </div>
+                            </div>
                             <ShieldCheck size={13} className="shrink-0" />
                             <span className="truncate">Section Milestone</span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setInspectingMilestone({ timelineId: item.timelineId, kind: 'section' }); }}
+                              className="p-0.5 text-slate-900 hover:text-white cursor-pointer"
+                              title="View & manage activities"
+                            >
+                              <ListChecks size={12} />
+                            </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleMilestoneRenameStart(item.timelineId, item.section.title); }}
                               className="p-0.5 text-slate-900 hover:text-white cursor-pointer"
@@ -1934,9 +2865,8 @@ export default function CourseOrganizer({
                             />
                           ) : (
                             <h4
-                              className="text-xs font-bold text-slate-900 dark:text-white line-clamp-1 cursor-text"
-                              title="Double-click to rename"
-                              onDoubleClick={(e) => { e.stopPropagation(); handleMilestoneRenameStart(item.timelineId, item.section.title); }}
+                              className="text-xs font-bold text-slate-900 dark:text-white line-clamp-1 cursor-pointer hover:text-amber-500 transition-colors"
+                              title="Click to view activities, or double-click header to edit"
                             >
                               {item.section.title}
                             </h4>
@@ -1959,8 +2889,9 @@ export default function CourseOrganizer({
                           ) : null}
 
                           <p className="text-[9px] text-slate-400 truncate" title={item.section.assessmentQuizTitle}>
-                            {item.section.questionTypes?.length ? `${item.section.questionTypes.length} Types • ${item.section.totalAssessmentPoints || 30} pts` : (item.section.assessmentQuizTitle || 'Multi-Type Quiz')}
+                            {item.section.assessmentQuestions?.length ? `${item.section.assessmentQuestions.length} Questions • ${item.section.totalAssessmentPoints || 30} pts` : (item.section.assessmentQuizTitle || 'Multi-Type Quiz')}
                           </p>
+                          <span className="text-[8px] text-amber-600/80 dark:text-amber-400/80 block">2x click to reveal activities</span>
                         </div>
 
                         {/* Section Footer */}
@@ -1971,16 +2902,32 @@ export default function CourseOrganizer({
                     ) : item.kind === 'completion_screen' ? (
                       /* CONGRATULATIONS / COMPLETION SCREEN CARD */
                       <div
+                        data-timeline-step-id={item.timelineId}
                         onPointerDown={(e) => startPointerDragTimelineStep(e, idx, item)}
                         className={`group relative flex-shrink-0 w-44 h-[180px] bg-gradient-to-b from-amber-500/10 via-emerald-500/10 to-slate-900 border-2 ${
                           isBeingDragged
                             ? 'opacity-30 scale-95 border-dashed border-amber-400 shadow-none'
-                            : 'border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/20 shadow-md hover:shadow-lg'
+                            : isSelectedInTimeline
+                              ? 'border-blue-400 ring-4 ring-blue-500/60 shadow-xl'
+                              : 'border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/20 shadow-md hover:shadow-lg'
                         } rounded-xl overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing select-none transition-all`}
                       >
                         {/* Header */}
                         <div className="px-2.5 py-1 bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 flex items-center justify-between text-[10px] font-extrabold shrink-0">
                           <div className="flex items-center gap-1.5 truncate">
+                            <div
+                              onClick={(e) => toggleTimelineItemSelection(item.timelineId, e)}
+                              className="cursor-pointer p-0.5 shrink-0"
+                              title={isSelectedInTimeline ? 'Deselect end screen' : 'Select end screen'}
+                            >
+                              <div className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all ${
+                                isSelectedInTimeline
+                                  ? 'bg-blue-600 border-white text-white'
+                                  : 'bg-black/20 border-slate-800 text-transparent hover:border-black'
+                              }`}>
+                                <Check size={9} strokeWidth={3} />
+                              </div>
+                            </div>
                             <Trophy size={13} className="shrink-0 text-slate-950" />
                             <span className="truncate">End Screen</span>
                           </div>
@@ -2041,6 +2988,7 @@ export default function CourseOrganizer({
                     ) : (
                       /* MEDIA OR QUIZ STEP CARD */
                       <div
+                        data-timeline-step-id={item.timelineId}
                         onPointerDown={(e) => startPointerDragTimelineStep(e, idx, item)}
                         onDoubleClick={() => {
                           if (isQuiz && item.quiz) {
@@ -2049,16 +2997,31 @@ export default function CourseOrganizer({
                         }}
                         className={`group relative flex-shrink-0 w-40 h-[180px] bg-white dark:bg-slate-900 border ${isBeingDragged
                             ? 'opacity-30 scale-95 border-dashed border-blue-400 shadow-none'
-                            : isQuiz
-                              ? 'border-indigo-300 dark:border-indigo-800 ring-1 ring-indigo-400/20 shadow-xs hover:shadow-md'
-                              : 'border-slate-300 dark:border-slate-700 shadow-xs hover:shadow-md'
+                            : isSelectedInTimeline
+                              ? 'border-blue-500 ring-4 ring-blue-500/60 shadow-xl bg-blue-50/20 dark:bg-blue-950/20'
+                              : isQuiz
+                                ? 'border-indigo-300 dark:border-indigo-800 ring-1 ring-indigo-400/20 shadow-xs hover:shadow-md'
+                                : 'border-slate-300 dark:border-slate-700 shadow-xs hover:shadow-md'
                           } rounded-xl overflow-hidden flex flex-col justify-between cursor-grab active:cursor-grabbing transition-all select-none touch-none`}
                         title="Drag to reorder steps, double-click quizzes to edit"
                       >
                         {/* Step Header */}
                         <div className={`px-2 py-0.5 ${isQuiz ? 'bg-indigo-50 dark:bg-indigo-950/60 border-b border-indigo-200 dark:border-indigo-900' : 'bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700'
                           } flex items-center justify-between text-[10px] shrink-0`}>
-                          <div className="flex items-center gap-1 min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div
+                              onClick={(e) => toggleTimelineItemSelection(item.timelineId, e)}
+                              className="cursor-pointer p-0.5 shrink-0"
+                              title={isSelectedInTimeline ? 'Deselect step' : 'Select step'}
+                            >
+                              <div className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all ${
+                                isSelectedInTimeline
+                                  ? 'bg-blue-600 border-blue-600 text-white'
+                                  : 'bg-black/10 dark:bg-white/10 border-slate-400 dark:border-slate-500 text-transparent hover:border-blue-500'
+                              }`}>
+                                <Check size={9} strokeWidth={3} />
+                              </div>
+                            </div>
                             <GripVertical size={12} className="text-slate-400 shrink-0 cursor-grab" />
                             <span className={`font-bold truncate ${isQuiz ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-300'}`}>
                               Step {idx + 1}
@@ -2140,19 +3103,19 @@ export default function CourseOrganizer({
                             </div>
                           ) : media?.type === 'video' ? (
                             <div className="relative w-full h-full flex items-center justify-center bg-slate-900 pointer-events-none">
-                              <video 
-                                src={media.url} 
-                                className="w-full h-full object-cover opacity-75" 
-                                preload="metadata" 
-                                muted 
-                                playsInline 
-                              />
+                              {media.thumbnailUrl ? (
+                                <img src={media.thumbnailUrl} alt={media.name} className="w-full h-full object-cover opacity-85 select-none" draggable={false} />
+                              ) : (
+                                <div className="w-full h-full bg-slate-900 flex items-center justify-center text-slate-500">
+                                  <Video size={24} />
+                                </div>
+                              )}
                               <div className="absolute p-1.5 bg-purple-600/85 text-white rounded-full shadow-md flex items-center justify-center">
                                 <Film size={13} />
                               </div>
                             </div>
                           ) : media ? (
-                            <img src={media.url} alt={media.name} className="w-full h-full object-cover" />
+                            <img src={media.thumbnailUrl || media.url} alt={media.name} className="w-full h-full object-cover" />
                           ) : null}
 
                           {/* Dimmed Overlay on Hover with Preview Action */}
@@ -2232,6 +3195,19 @@ export default function CourseOrganizer({
               </div>
             </>
           )}
+
+          {/* Drag Selection Marquee Box (Timeline / Filmstrip) */}
+          {timelineMarquee && timelineMarquee.isSelecting && (
+            <div
+              className="fixed pointer-events-none z-50 border border-blue-500 bg-blue-500/20 backdrop-blur-[0.5px] rounded"
+              style={{
+                left: Math.min(timelineMarquee.startX, timelineMarquee.currentX),
+                top: Math.min(timelineMarquee.startY, timelineMarquee.currentY),
+                width: Math.abs(timelineMarquee.currentX - timelineMarquee.startX),
+                height: Math.abs(timelineMarquee.currentY - timelineMarquee.startY),
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -2269,7 +3245,7 @@ export default function CourseOrganizer({
         onEditQuiz={(quiz) => onOpenQuizEditor?.(quiz)}
         onDuplicateQuiz={handleDuplicateQuiz}
         onDeleteQuiz={handleDeleteQuiz}
-        onNavigateToMedia={onNavigateToMedia}
+        onImportMedia={handleManualImportFiles}
         onFilterChange={(filter) => setActiveFilter(filter)}
       />
 
@@ -2642,6 +3618,287 @@ export default function CourseOrganizer({
           </div>
         </div>
       )}
+
+      {/* Milestone Activities Inspector Modal (Revealed on Double Click or View Activities button) */}
+      {inspectingMilestone && (() => {
+        const item = timeline.find(t => t.timelineId === inspectingMilestone.timelineId);
+        if (!item) return null;
+
+        const isFinal = inspectingMilestone.kind === 'final_assessment';
+        const title = isFinal ? item.finalAssessment?.title : item.section?.title;
+        const passPct = isFinal ? item.finalAssessment?.requiredPassingScorePct : item.section?.requiredPassingScorePct;
+        const questions: AssessmentQuestionItem[] = (isFinal ? item.finalAssessment?.assessmentQuestions : item.section?.assessmentQuestions) || [];
+        const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
+
+        const handleRemoveQuestion = (quizId: string) => {
+          updateTimeline(prev => prev.map(t => {
+            if (t.timelineId !== inspectingMilestone.timelineId) return t;
+            if (t.kind === 'section' && t.section) {
+              const updatedQuestions = (t.section.assessmentQuestions || []).filter(q => q.quizId !== quizId);
+              const questionTypes = Array.from(new Set<string>(updatedQuestions.map(q => q.quizType)));
+              const updatedPoints = updatedQuestions.reduce((sum, q) => sum + q.points, 0);
+              return {
+                ...t,
+                section: {
+                  ...t.section,
+                  assessmentQuestions: updatedQuestions,
+                  questionTypes,
+                  totalAssessmentPoints: updatedPoints || 30,
+                }
+              };
+            } else if (t.kind === 'final_assessment' && t.finalAssessment) {
+              const updatedQuestions = (t.finalAssessment.assessmentQuestions || []).filter(q => q.quizId !== quizId);
+              const questionTypes = Array.from(new Set<string>(updatedQuestions.map(q => q.quizType)));
+              const updatedPoints = updatedQuestions.reduce((sum, q) => sum + q.points, 0);
+              return {
+                ...t,
+                finalAssessment: {
+                  ...t.finalAssessment,
+                  assessmentQuestions: updatedQuestions,
+                  questionTypes,
+                  totalAssessmentPoints: updatedPoints || 50,
+                }
+              };
+            }
+            return t;
+          }));
+          showToast('Removed quiz activity from milestone');
+        };
+
+        const handleAddQuizToMilestone = (quiz: QuizActivity) => {
+          updateTimeline(prev => prev.map(t => {
+            if (t.timelineId !== inspectingMilestone.timelineId) return t;
+            const newQ: AssessmentQuestionItem = {
+              quizId: quiz.id,
+              quizName: quiz.name,
+              quizType: quiz.type,
+              points: quiz.type === 'Essay' ? 0 : (quiz.totalPoints || 10),
+              prompt: quiz.prompt,
+            };
+
+            if (t.kind === 'section' && t.section) {
+              const existing = t.section.assessmentQuestions || [];
+              if (existing.some(e => e.quizId === quiz.id)) return t;
+              const updatedQuestions = [...existing, newQ];
+              const questionTypes = Array.from(new Set<string>(updatedQuestions.map(q => q.quizType)));
+              const updatedPoints = updatedQuestions.reduce((sum, q) => sum + q.points, 0);
+              return {
+                ...t,
+                section: {
+                  ...t.section,
+                  assessmentQuestions: updatedQuestions,
+                  questionTypes,
+                  totalAssessmentPoints: updatedPoints || 30,
+                }
+              };
+            } else if (t.kind === 'final_assessment' && t.finalAssessment) {
+              const existing = t.finalAssessment.assessmentQuestions || [];
+              if (existing.some(e => e.quizId === quiz.id)) return t;
+              const updatedQuestions = [...existing, newQ];
+              const questionTypes = Array.from(new Set<string>(updatedQuestions.map(q => q.quizType)));
+              const updatedPoints = updatedQuestions.reduce((sum, q) => sum + q.points, 0);
+              return {
+                ...t,
+                finalAssessment: {
+                  ...t.finalAssessment,
+                  assessmentQuestions: updatedQuestions,
+                  questionTypes,
+                  totalAssessmentPoints: updatedPoints || 50,
+                }
+              };
+            }
+            return t;
+          }));
+          showToast(`Attached quiz "${quiz.name}" to assessment`);
+        };
+
+        // Available quizzes from library that are not yet added
+        const availableQuizzes = quizActivities.filter(q => !questions.some(itemQ => itemQ.quizId === q.id));
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div
+              className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className={`p-4 border-b flex items-center justify-between text-white ${
+                isFinal ? 'bg-gradient-to-r from-purple-700 to-indigo-800 border-purple-600' : 'bg-gradient-to-r from-amber-600 to-yellow-600 border-amber-500'
+              }`}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="p-2 bg-white/20 rounded-xl backdrop-blur-xs shrink-0">
+                    {isFinal ? <Crown size={20} className="text-amber-300" /> : <ShieldCheck size={20} className="text-white" />}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-black/30 px-2 py-0.5 rounded-full">
+                        {isFinal ? 'Final Assessment Milestone' : 'Section Checkpoint Assessment'}
+                      </span>
+                      <span className="text-xs text-white/80">•</span>
+                      <span className="text-xs font-semibold text-amber-200">
+                        {passPct}% Pass Threshold
+                      </span>
+                    </div>
+                    <h3 className="font-bold text-base truncate mt-0.5 text-white">
+                      {title}
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInspectingMilestone(null)}
+                  className="p-1.5 rounded-xl hover:bg-white/20 text-white/90 hover:text-white cursor-pointer transition-colors"
+                  title="Close Inspector"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Assessment Summary Strip */}
+              <div className="px-5 py-3 bg-slate-50 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    Activities: <strong className="text-blue-600 dark:text-blue-400">{questions.length}</strong>
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    Total Points: <strong className="text-amber-500">{totalPoints} pts</strong>
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Drag & drop quizzes from library anytime to attach
+                </span>
+              </div>
+
+              {/* Modal Body: List of attached activities */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2.5">
+                    Attached Quiz Questions ({questions.length})
+                  </h4>
+
+                  {questions.length === 0 ? (
+                    <div className="p-6 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/40">
+                      <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                        No quiz activities attached to this checkpoint yet.
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Select an existing quiz below or drag and drop quizzes directly onto the milestone card in the timeline track.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {questions.map((qItem, qIdx) => {
+                        const originalQuiz = quizActivities.find(q => q.id === qItem.quizId);
+                        return (
+                          <div
+                            key={qItem.quizId || qIdx}
+                            className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/80 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-all"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center text-[10px] font-bold shrink-0">
+                                {qIdx + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                                  {qItem.quizName}
+                                </p>
+                                <p className="text-[11px] text-slate-400 truncate">
+                                  {qItem.prompt || 'Interactive Question Activity'}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                {qItem.quizType}
+                              </span>
+                              <span className="text-xs font-bold text-amber-500 min-w-14 text-right">
+                                {qItem.quizType === 'Essay' ? '0 pts (Required)' : `${qItem.points} pts`}
+                              </span>
+
+                              {originalQuiz && onOpenQuizEditor && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setInspectingMilestone(null);
+                                    onOpenQuizEditor(originalQuiz);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+                                  title="Edit Quiz in Builder"
+                                >
+                                  <Edit3 size={13} />
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveQuestion(qItem.quizId)}
+                                className="p-1.5 text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer transition-colors"
+                                title="Detach question from checkpoint"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Available Quizzes from Library to Quick Add */}
+                {availableQuizzes.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                      Attach More Quizzes from Library ({availableQuizzes.length})
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                      {availableQuizzes.map(quiz => (
+                        <button
+                          key={quiz.id}
+                          type="button"
+                          onClick={() => handleAddQuizToMilestone(quiz)}
+                          className="flex items-center justify-between p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-600 bg-slate-50 dark:bg-slate-900 text-left cursor-pointer transition-all group"
+                        >
+                          <div className="min-w-0 flex items-center gap-2">
+                            <Plus size={13} className="text-blue-600 dark:text-blue-400 shrink-0 group-hover:scale-110 transition-transform" />
+                            <div className="min-w-0">
+                              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block">
+                                {quiz.name}
+                              </span>
+                              <span className="text-[10px] text-slate-400 truncate block">
+                                {quiz.type} • {quiz.totalPoints || 10} pts
+                              </span>
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            + Add
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
+                <span className="text-xs text-slate-500">
+                  {isFinal ? '🏆 Course Completion Gate' : '🛡️ Gate Blocker on Fail'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setInspectingMilestone(null)}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Full Course Learner Preview Modal */}
       <CoursePlayerPreviewModal

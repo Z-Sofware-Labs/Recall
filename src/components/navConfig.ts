@@ -2,9 +2,8 @@ import { LayoutDashboard, Presentation, BrainCircuit, FileText, Settings, Award,
 
 export const navItems = [
   { name: 'Dashboard', icon: LayoutDashboard },
-  { name: 'Media Organizer', icon: Presentation },
-  { name: 'Quiz Builder', icon: BrainCircuit },
   { name: 'Course Editor', icon: LayoutGrid },
+  { name: 'Quiz Builder', icon: BrainCircuit },
   { name: 'Certificate Builder', icon: Award },
   { name: 'Export Settings', icon: FileText },
   { name: 'System Settings', icon: Settings },

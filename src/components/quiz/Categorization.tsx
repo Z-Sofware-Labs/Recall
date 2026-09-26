@@ -620,28 +620,36 @@ export default function Categorization({ initialData, onBack, onSaveToCourse }: 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Question Title & Prompt */}
               <div className="space-y-2">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Question Prompt / Title
+                <label
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  ACTIVITY NAME
                 </label>
                 <input
                   type="text"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="e.g. Sort each item into its correct group"
+                  title="Write the name of the activity that will appear on the Course Organizer. (optional)"
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
               </div>
 
               {/* Learner Instructions */}
               <div className="space-y-2">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Learner Instructions / Question
+                <label
+                  title="Write the general instructions for this activity in this box. (optional)"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider cursor-help"
+                >
+                  OVERALL INSTRUCTION
                 </label>
                 <input
                   type="text"
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
                   placeholder="e.g. Drag each card to the matching category bucket."
+                  title="Write the general instructions for this activity in this box. (optional)"
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
               </div>

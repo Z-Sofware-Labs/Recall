@@ -1,6 +1,6 @@
 import { ProjectData } from './projectService';
 import { ExportCourseOptions } from './exportService';
-import { STANDALONE_PLAYER_BUNDLE_JS } from './playerBundle.generated';
+import { STANDALONE_PLAYER_BUNDLE_JS, STANDALONE_PLAYER_BUNDLE_CSS } from './playerBundle.generated';
 
 function escapeHtml(str: string): string {
   if (!str) return '';
@@ -22,8 +22,9 @@ function sanitizeMediaUrlForStandalone(url?: string): string {
 }
 
 /**
- * Generate a complete, standalone, self-contained HTML5 Player for the given course
- * Powered directly by the compiled React CoursePlayerEngine.
+ * Generate a complete, standalone, self-contained HTML5 Player for the given course.
+ * Powered directly by the compiled React CoursePlayerEngine and local bundled Tailwind styles.
+ * 100% OFFLINE: Completely free of Google Fonts, CDN Tailwind, or external scripts.
  */
 export function generateStandalonePlayerHtml(
   project: ProjectData,
@@ -57,7 +58,7 @@ export function generateStandalonePlayerHtml(
   const serializedProject = JSON.stringify(clonedProject).replace(/</g, '\\u003c');
   const initialTheme = options.theme || 'auto';
 
-  return `<!DOCTYPE html>
+  const rawHtml = `<!DOCTYPE html>
 <html lang="en" style="height: 100%; min-height: 100dvh;">
 <head>
   <meta charset="UTF-8">
@@ -66,22 +67,7 @@ export function generateStandalonePlayerHtml(
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <title>${escapeHtml(courseTitle)} - Learner Player</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
-            serif: ['"Playfair Display"', 'Georgia', 'serif'],
-          }
-        }
-      }
-    };
     (function() {
       var pref = '${initialTheme}';
       var isDark = pref === 'dark' || ((pref === 'auto' || pref === 'device') ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) : pref !== 'light');
@@ -93,6 +79,14 @@ export function generateStandalonePlayerHtml(
     })();
   </script>
   <style>
+    /* Local Compiled Tailwind & App Styles for 100% Offline Capability */
+    ${STANDALONE_PLAYER_BUNDLE_CSS || ''}
+
+    /* Robust Offline System-Font Fallback */
+    body, button, input, select, textarea {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+
     * {
       box-sizing: border-box;
       -webkit-tap-highlight-color: transparent;
@@ -104,7 +98,6 @@ export function generateStandalonePlayerHtml(
       height: 100%;
       overflow: hidden;
       user-select: none;
-      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     }
     .custom-scrollbar::-webkit-scrollbar {
       width: 6px;
@@ -120,6 +113,15 @@ export function generateStandalonePlayerHtml(
     }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
       background: #475569;
+    }
+    @keyframes phoneRotate {
+      0% { transform: rotate(0deg); }
+      25% { transform: rotate(-15deg); }
+      75% { transform: rotate(90deg); }
+      100% { transform: rotate(90deg); }
+    }
+    .animate-spin-slow {
+      animation: phoneRotate 2.4s ease-in-out infinite alternate;
     }
     @media print {
       * {
@@ -144,13 +146,13 @@ export function generateStandalonePlayerHtml(
 </head>
 <body class="flex flex-col h-full w-full overflow-hidden transition-colors">
   <div id="root" class="flex flex-col h-full w-full overflow-hidden"></div>
-  <script>
-    window.__RECALL_COURSE_DATA__ = ${serializedProject};
-    window.__RECALL_INITIAL_THEME__ = '${initialTheme}';
-  </script>
-  <script>
-    ${STANDALONE_PLAYER_BUNDLE_JS}
-  </script>
+  <script>window.__RECALL_COURSE_DATA__=${serializedProject};window.__RECALL_INITIAL_THEME__='${initialTheme}';</script>
+  <script>${STANDALONE_PLAYER_BUNDLE_JS}</script>
 </body>
 </html>`;
+
+  // Minify outer HTML boilerplate whitespace
+  return rawHtml
+    .replace(/^\s+/gm, '') // Remove line leading whitespace
+    .replace(/<!--[\s\S]*?-->/g, ''); // Strip comments
 }

@@ -48,11 +48,20 @@ export interface EnumerationKeyItem {
   explanation?: string;
 }
 
+export interface EnumerationQuestionItem {
+  id: string;
+  prompt: string;
+  instructions?: string;
+  items: EnumerationKeyItem[];
+  strictOrder?: boolean;
+}
+
 export interface EnumerationActivityData {
   items: EnumerationKeyItem[];
   strictOrder: boolean;
   caseSensitive: boolean;
   itemCount: number;
+  questions?: EnumerationQuestionItem[];
 }
 
 export interface EssayActivityData {
@@ -133,8 +142,16 @@ export interface SequenceStep {
   correctOrder: number;
 }
 
-export interface SequencingActivityData {
+export interface SequencingQuestionItem {
+  id: string;
+  prompt: string;
   steps: SequenceStep[];
+  explanation?: string;
+}
+
+export interface SequencingActivityData {
+  questions?: SequencingQuestionItem[];
+  steps?: SequenceStep[];
   explanation?: string;
 }
 
