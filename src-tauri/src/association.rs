@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 use std::path::{Path, PathBuf};
+#[allow(unused_imports)]
 use std::process::Command;
 
 #[cfg(target_os = "windows")]
