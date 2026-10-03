@@ -280,6 +280,77 @@ export default function Dashboard({
     showStatus('success', 'Project closed.');
   };
 
+  const renderInfoPanel = (isMobileOrNarrow: boolean) => (
+    <aside className={isMobileOrNarrow ? "w-full xl:hidden" : "hidden xl:flex xl:w-80 shrink-0 self-stretch flex-col"}>
+      <div className="relative p-6 sm:p-7 flex flex-col justify-between flex-1 select-none">
+        {/* Subtle watermarked app icon in bottom right */}
+        <div className="absolute -bottom-6 -right-6 w-48 h-48 opacity-[0.07] dark:opacity-[0.06] pointer-events-none overflow-hidden select-none">
+          <img src="/app-icon.png" alt="" className="w-full h-full object-contain filter grayscale" draggable={false} />
+        </div>
+
+        <div className="space-y-5 relative z-10">
+          {/* Header: App Icon and Title sitting directly on background */}
+          <div className="flex items-center gap-3.5">
+            <img 
+              src="/app-icon.png" 
+              alt="Recall App Icon" 
+              className="w-14 h-14 object-contain select-none filter drop-shadow-sm"
+              draggable={false}
+            />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Recall
+                </h2>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-600 text-white rounded uppercase shadow-2xs">
+                  v1.3.0
+                </span>
+              </div>
+              <p className="text-xs text-blue-700 dark:text-sky-300 font-bold mt-0.5">
+                Interactive Learning Studio
+              </p>
+            </div>
+          </div>
+
+          {/* Clean classic divider line without box */}
+          <div className="h-px w-full bg-linear-to-r from-blue-400/60 via-slate-300 to-transparent dark:from-sky-500/50 dark:via-slate-700 dark:to-transparent"></div>
+
+          {/* Description & Getting Started Guidance */}
+          <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+            <p>
+              Welcome to <strong className="text-slate-900 dark:text-white font-bold">Recall</strong>. This workspace is your central hub for creating and organizing interactive courses.
+            </p>
+            <p className="text-slate-600 dark:text-slate-400 text-[11.5px]">
+              To get started, choose an action on the left: open an existing course file (<code className="bg-blue-100/70 dark:bg-slate-800/80 px-1 py-0.5 rounded text-blue-800 dark:text-sky-300 font-mono text-[11px]">.recall</code>) or start a new project from scratch.
+            </p>
+          </div>
+
+          {/* Feature Guide */}
+          <div className="pt-2 space-y-2 border-t border-slate-300/70 dark:border-slate-800 text-[11.5px] text-slate-700 dark:text-slate-300">
+            <span className="block font-bold text-slate-900 dark:text-white text-xs mb-1">
+              Quick Capabilities:
+            </span>
+            <ul className="space-y-1.5 list-disc list-inside text-slate-600 dark:text-slate-400 pl-0.5">
+              <li>Import PowerPoint slide decks & videos</li>
+              <li>Sequence lessons on the visual timeline</li>
+              <li>Insert checkpoint quizzes with pass gates</li>
+              <li>Design & issue course completion certificates</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Footer note directly on the gradient */}
+        <div className="pt-4 mt-6 border-t border-slate-300/70 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 relative z-10">
+          <span className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>System Ready</span>
+          </span>
+          <span>100% Offline & Private</span>
+        </div>
+      </div>
+    </aside>
+  );
+
   return (
     <div className="w-full flex flex-col xl:flex-row items-start gap-6">
       {/* Left/Main Column: Project Workspaces, Actions & Recent History */}
@@ -414,64 +485,52 @@ export default function Dashboard({
         </section>
       )}
 
-      {/* Load & Manage Projects */}
-      <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Project Actions</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* When window is narrow, place the right side info panel directly above Project Actions */}
+        {renderInfoPanel(true)}
+
+        {/* Load & Manage Projects */}
+        <section className="space-y-4">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Project Actions</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* Browse Local Projects */}
           <button
             onClick={handleBrowseProject}
             disabled={isLoading}
-            className="flex items-start gap-4 p-5 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-2xl shadow-xs text-left transition-all group cursor-pointer"
+            className="flex items-center gap-3 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-xl shadow-xs text-left transition-all group cursor-pointer"
           >
-            <div className="p-3 bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 rounded-xl group-hover:scale-105 transition-transform">
-              {isLoading ? <Loader2 size={24} className="animate-spin" /> : <FileUp size={24} />}
+            <div className="p-2.5 bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 rounded-lg group-hover:scale-105 transition-transform shrink-0">
+              {isLoading ? <Loader2 size={20} className="animate-spin" /> : <FileUp size={20} />}
             </div>
-            <div>
-              <span className="block font-semibold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                Browse Local Projects
-              </span>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                Open an existing <span className="font-mono text-blue-600 dark:text-blue-400">.recall</span> or <span className="font-mono text-blue-600 dark:text-blue-400">.json</span> project from your disk.
-              </p>
-            </div>
+            <span className="font-semibold text-sm text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+              Browse Local Projects
+            </span>
           </button>
 
           {/* Create New Project */}
           <button
             onClick={handleStartNewProjectClick}
-            className="flex items-start gap-4 p-5 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-2xl shadow-xs text-left transition-all group cursor-pointer"
+            className="flex items-center gap-3 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-xl shadow-xs text-left transition-all group cursor-pointer"
           >
-            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-xl group-hover:scale-105 transition-transform">
-              <PlusCircle size={24} />
+            <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-lg group-hover:scale-105 transition-transform shrink-0">
+              <PlusCircle size={20} />
             </div>
-            <div>
-              <span className="block font-semibold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                Start New Project
-              </span>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                Begin authoring a clean course timeline and interactive question bank.
-              </p>
-            </div>
+            <span className="font-semibold text-sm text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+              Start New Project
+            </span>
           </button>
 
           {/* Close Active Project */}
           {currentProject && (
             <button
               onClick={handleCloseProjectClick}
-              className="flex items-start gap-4 p-5 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 hover:border-rose-500 dark:hover:border-rose-500 rounded-2xl shadow-xs text-left transition-all group cursor-pointer"
+              className="flex items-center gap-3 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-rose-500 dark:hover:border-rose-500 rounded-xl shadow-xs text-left transition-all group cursor-pointer"
             >
-              <div className="p-3 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 rounded-xl group-hover:scale-105 transition-transform">
-                <XCircle size={24} />
+              <div className="p-2.5 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 rounded-lg group-hover:scale-105 transition-transform shrink-0">
+                <XCircle size={20} />
               </div>
-              <div>
-                <span className="block font-semibold text-slate-900 dark:text-white group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">
-                  Close Project
-                </span>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Close the active project and return to an empty workspace.
-                </p>
-              </div>
+              <span className="font-semibold text-sm text-slate-900 dark:text-white group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">
+                Close Project
+              </span>
             </button>
           )}
         </div>
@@ -588,75 +647,8 @@ export default function Dashboard({
       />
       </div>
 
-      {/* Right Column: Win98 Web Folders Style Transparent Panel on Main Gradient */}
-      <aside className="w-full xl:w-80 shrink-0 self-stretch flex flex-col">
-        <div className="relative p-6 sm:p-7 flex flex-col justify-between flex-1 select-none">
-          {/* Subtle watermarked app icon in bottom right */}
-          <div className="absolute -bottom-6 -right-6 w-48 h-48 opacity-[0.07] dark:opacity-[0.06] pointer-events-none overflow-hidden select-none">
-            <img src="/app-icon.png" alt="" className="w-full h-full object-contain filter grayscale" draggable={false} />
-          </div>
-
-          <div className="space-y-5 relative z-10">
-            {/* Header: App Icon and Title sitting directly on background */}
-            <div className="flex items-center gap-3.5">
-              <img 
-                src="/app-icon.png" 
-                alt="Recall App Icon" 
-                className="w-14 h-14 object-contain select-none filter drop-shadow-sm"
-                draggable={false}
-              />
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                    Recall
-                  </h2>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-600 text-white rounded uppercase shadow-2xs">
-                    v1.2.0
-                  </span>
-                </div>
-                <p className="text-xs text-blue-700 dark:text-sky-300 font-bold mt-0.5">
-                  Interactive Learning Studio
-                </p>
-              </div>
-            </div>
-
-            {/* Clean classic divider line without box */}
-            <div className="h-px w-full bg-linear-to-r from-blue-400/60 via-slate-300 to-transparent dark:from-sky-500/50 dark:via-slate-700 dark:to-transparent"></div>
-
-            {/* Description & Getting Started Guidance */}
-            <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
-              <p>
-                Welcome to <strong className="text-slate-900 dark:text-white font-bold">Recall</strong>. This workspace is your central hub for creating and organizing interactive courses.
-              </p>
-              <p className="text-slate-600 dark:text-slate-400 text-[11.5px]">
-                To get started, choose an action on the left: open an existing course file (<code className="bg-blue-100/70 dark:bg-slate-800/80 px-1 py-0.5 rounded text-blue-800 dark:text-sky-300 font-mono text-[11px]">.recall</code>) or start a new project from scratch.
-              </p>
-            </div>
-
-            {/* Feature Guide */}
-            <div className="pt-2 space-y-2 border-t border-slate-300/70 dark:border-slate-800 text-[11.5px] text-slate-700 dark:text-slate-300">
-              <span className="block font-bold text-slate-900 dark:text-white text-xs mb-1">
-                Quick Capabilities:
-              </span>
-              <ul className="space-y-1.5 list-disc list-inside text-slate-600 dark:text-slate-400 pl-0.5">
-                <li>Import PowerPoint slide decks & videos</li>
-                <li>Sequence lessons on the visual timeline</li>
-                <li>Insert checkpoint quizzes with pass gates</li>
-                <li>Design & issue course completion certificates</li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Footer note directly on the gradient */}
-          <div className="pt-4 mt-6 border-t border-slate-300/70 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 relative z-10">
-            <span className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>System Ready</span>
-            </span>
-            <span>100% Offline & Private</span>
-          </div>
-        </div>
-      </aside>
+      {/* Right Column: rendered on the side for wide windows (xl and above) */}
+      {renderInfoPanel(false)}
     </div>
   );
 }

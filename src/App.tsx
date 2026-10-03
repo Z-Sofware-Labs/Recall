@@ -306,7 +306,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-white dark:bg-slate-950 transition-colors duration-300 overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen bg-white dark:bg-slate-950 transition-colors duration-300 overflow-x-auto overflow-y-hidden">
       {/* Mobile Top Navigation Header */}
       <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 z-30">
         <div className="flex items-center gap-3">
@@ -354,7 +354,7 @@ export default function App() {
       />
 
       {/* Main View Area */}
-      <main className={`flex-1 h-full p-3 sm:p-4 lg:p-6 overflow-y-auto flex flex-col min-w-0 transition-colors duration-300 ${
+      <main className={`flex-1 h-full p-3 sm:p-4 lg:p-6 overflow-auto flex flex-col min-w-0 transition-colors duration-300 ${
         activeTab === 'Dashboard'
           ? 'bg-linear-to-r from-white via-blue-50/70 to-sky-200/90 dark:from-slate-950 dark:via-slate-900 dark:to-[#0c1a30]'
           : ''
